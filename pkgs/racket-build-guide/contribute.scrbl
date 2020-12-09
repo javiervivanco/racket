@@ -157,10 +157,14 @@ make that process faster by keeping a few guidelines in mind:
 
  @item{Include new or updated documentation as appropriate.
 
-       Note that the Racket reference is in
-       @filepath{pkgs/racket-doc/scribblings/reference}, and
-       documentation for other libraries are also sometimes in a
-       separate @filepath{-doc} package.
+       To locate a documentation (Scribble) source file,
+       visit the current documentation in a browser, and click at the page heading.
+       A box will appear with a URL to a documentation source.
+       Note that while it is likely that the documentation source will not be the file
+       that you want to edit exactly, it should give you a rough idea for where it is.
+       Particularly, the Racket reference is in
+       @filepath{pkgs/racket-doc/scribblings/reference}, and the Racket guide is in
+       @filepath{pkgs/racket-doc/scribblings/guide}.
 
        When adding to a library or extending an existing binding's
        behavior, be sure to include a @racket[history] note in the
@@ -177,6 +181,13 @@ make that process faster by keeping a few guidelines in mind:
        tests, but where a change creates a new package dependency that
        will only be detected by a full @exec{raco setup}.
        @italic{Really:} run @exec{raco setup}.}
+
+ @item{For changes to the C code, ensure your code follows the C99 standard.
+
+       On Unix systems, extensions that are part of the @exec{_DEFAULT_SOURCE}
+       pre-processor flag are also allowed. See the
+       @hyperlink["https://www.gnu.org/software/libc/manual/html_node/Feature-Test-Macros.html#index-_005fDEFAULT_005fSOURCE"]{glibc}
+       manual for more details.}
 
 ]
 

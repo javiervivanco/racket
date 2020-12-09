@@ -16,6 +16,7 @@
          "../namespace/namespace.rkt"
          "../namespace/module.rkt"
          "../syntax/binding.rkt"
+         "../eval/protect.rkt"
          "dup-check.rkt"
          "free-id-set.rkt"
          "stop-ids.rkt"
@@ -887,10 +888,13 @@
           (for ([kw (in-list (m 'kw))])
             (unless (keyword? (syntax-e kw))
               (raise-syntax-error #f "expected a keyword" exp-body kw))
-            (unless (memq (syntax-e kw) '(#:cross-phase-persistent #:empty-namespace))
+            (unless (memq (syntax-e kw) '(#:cross-phase-persistent #:empty-namespace #:unsafe))
               (raise-syntax-error #f "not an allowed declaration keyword" exp-body kw))
             (when (hash-ref declared-keywords (syntax-e kw) #f)
               (raise-syntax-error #f "keyword declared multiple times" exp-body kw))
+            (when (eq? (syntax-e kw) '#:unsafe)
+              (unless (eq? (current-code-inspector) initial-code-inspector)
+                (raise-syntax-error #f "unsafe compilation disallowed by code inspector" exp-body kw)))
             (hash-set! declared-keywords (syntax-e kw) kw))
           (define parsed-body (parsed-#%declare exp-body))
           (cons (if (expand-context-to-parsed? partial-body-ctx)
@@ -1079,7 +1083,7 @@
 ;; ----------------------------------------
 
 ;; Pass 3 of `module` expansion, which parses `provide` forms and
-;; matches them up with defintiions and requires
+;; matches them up with definitions and requires
 (define (resolve-provides expression-expanded-bodys
                           #:requires-and-provides requires+provides
                           #:declared-submodule-names declared-submodule-names

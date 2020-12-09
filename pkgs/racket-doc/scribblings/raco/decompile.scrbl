@@ -12,9 +12,12 @@
 The @exec{raco decompile} command takes the path of a bytecode file (which usually
  has the file extension @filepath{.zo}) or a source file with an
  associated bytecode file (usually created with @exec{raco make}) and
- converts the bytecode file's content back to an approximation of Racket code. Decompiled
- bytecode is mostly useful for checking the compiler's transformation
- and optimization of the source program.
+ converts the bytecode file's content back to an approximation of Racket code.
+ When the ``bytecode'' file contains machine code, as for the @tech[#:doc guide-doc]{CS}
+ variant of Racket, then it cannot be converted back to an approximation of
+ Racket, but installing the @filepath{disassemble} package may enable disassembly
+ of the machine code. Decompilation is mostly useful for checking the
+ compiler's transformation and optimization of the source program.
 
 The @exec{raco decompile} command accepts the following command-line flags:
 
@@ -23,11 +26,44 @@ The @exec{raco decompile} command accepts the following command-line flags:
         given file's path and an associated @filepath{.zo} file (if any)}
   @item{@Flag{n} @nonterm{n} or @DFlag{columns} @nonterm{n} --- format
         output for a display with @nonterm{n} columns}
+  @item{@DFlag{linklet} --- decompile only as far as linklets, instead
+        of decoding linklets to approximate Racket @racket[module] forms}
+  @item{@DFlag{no-disassemble} --- show machine code as-is in a byte string,
+        instead of attempting to disassemble}
+  @item{@DFlag{partial-fasl} --- preserve more of the original structure of
+        the bytecode file, instead of focusing on procedure bodies}
 ]
 
-Many forms in the decompiled code, such as @racket[module],
- @racket[define], and @racket[lambda], have the same meanings as
- always. Other forms and transformations are specific to the rendering
+@history[#:changed "1.8" @elem{Added @DFlag{no-disassemble}.}
+         #:changed "1.9" @elem{Added @DFlag{partial-fasl}.}]
+
+@section{Racket CS Decompilation}
+
+Decompilation of Racket CS bytecode mostly shows the structure of a
+module around machine-code implementations of procedures.
+
+@itemize[
+
+@item{A @racketidfont{#%machine-code} form corresponds to machine code
+ that is not disassembled, where the machine code is in a byte string.}
+
+@item{A @racketidfont{#%assembly-code} form corresponds to disassembled
+ machine code, where the assembly code is shown as a sequence of strings.}
+
+@item{A @racketidfont{#%interpret} form corresponds to a compiled form
+ of a large procedure, where only smaller nested procedures are compiled
+ to machine code.}
+
+]
+
+@section{Racket BC Decompilation}
+
+Racket BC bytecode has a structure that is close enough to Racket's
+ core language that it can more often be converted to an approximation
+ of Racket code. To the degree that it can be converted back,
+ many forms in the decompiled code have the same meanings as
+ always, such as @racket[module], @racket[define], and @racket[lambda].
+ Other forms and transformations are specific to the rendering
  of bytecode, and they reflect a specific execution model:
 
 @itemize[
@@ -121,9 +157,6 @@ Many forms in the decompiled code, such as @racket[module],
  argument might have a name that starts @racketidfont{argflonum} or a
  local binding might have a name that starts @racketidfont{flonum} to
  indicate a flonum value.}
-
-@item{A @racketidfont{#%decode-syntax} form corresponds to a syntax
- object.}
 
 ]
 

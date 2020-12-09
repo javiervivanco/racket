@@ -12,7 +12,9 @@
 
 (define collection 'multi)
 
-(define version "7.5.0.14")
+;; In the Racket source repo, this version should change only when
+;; "racket_version.h" changes:
+(define version "7.9.0.11")
 
 (define deps `("racket-lib"
                ["racket" #:version ,version]))

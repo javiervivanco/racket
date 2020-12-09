@@ -82,6 +82,9 @@
 (syntax-test #'(+ 3 . 4))
 (syntax-test #'(apply + 1 . 2))
 
+(test 'ok 'check-literal-quote-syntax-as-test (if (quote-syntax yes) 'ok 'bug!))
+(test 'ok2 'check-literal-quote-syntax-as-test (if (quote-syntax #f) 'ok2 'bug!))
+
 (test 8 (lambda (x) (+ x x)) 4)
 (define reverse-subtract
   (lambda (x y) (- y x)))
@@ -568,6 +571,33 @@
   (test 2 f (hash 't "t" 'w "w" 'o "o"))
   (test 1 f #s(o n e))
   (test (void) f #f))
+
+;; Make sure a mixture of fixnums and non-fixnums works:
+(let ()
+  (define (f x)
+    (case x
+      [(1) 'one]
+      [(1000) 'onek]
+      [(1001) 'onek+]
+      [(1002) 'onek+]
+      [(1003) 'onek+]
+      [(1000000) 'onem]
+      [(1000000000) 'onet]
+      [(1000000000000) 'oneqd]
+      [(1000000000001) 'oneqd+]
+      [(1000000000002) 'oneqd+]
+      [(1000000000003) 'oneqd+]
+      [(1000000000000000) 'oneqt]
+      [(1000000000000000000) 'ones]
+      [(1000000000000000001) 'ones+]
+      [(1000000000000000002) 'ones+]))
+  (test 'one f 1)
+  (test 'onek f 1000)
+  (test 'onem f 1000000)
+  (test 'onet f 1000000000)
+  (test 'oneqd f 1000000000000)
+  (test 'oneqt f 1000000000000000)
+  (test 'ones f 1000000000000000000))
 
 (test #t 'and (and (= 2 2) (> 2 1)))
 (test #f 'and (and (= 2 2) (< 2 1)))
@@ -1268,6 +1298,24 @@
 (error-test #'(parameterize ([(lambda () 10) 10]) 8))
 (error-test #'(parameterize ([(lambda (a) 10) 10]) 8))
 (error-test #'(parameterize ([(lambda (a b) 10) 10]) 8))
+
+;; Check documented order of evaluation
+(let ([str (let ([o (open-output-string)])
+             (define p1 (make-parameter 1 (λ (x) (displayln "p1" o) x)))
+             (define p2 (make-parameter 2 (λ (x) (displayln "p2" o) x)))
+             (parameterize ([(begin (displayln "b1" o) p1) (begin (displayln "a1" o) 4)]
+                            [(begin (displayln "b2" o) p2) (begin (displayln "a2" o) 5)])
+               3)
+             (get-output-string o))])
+  (test "b1\na1\nb2\na2\np1\np2\n" values str))
+(let ([str (let ([o (open-output-string)])
+             (define p1 (make-parameter 1 (λ (x) (displayln "p1" o) x)))
+             (err/rt-test/once
+              (parameterize ([(begin (displayln "b1" o) p1) (begin (displayln "a1" o) 4)]
+                             [(begin (displayln "b2" o) 'no) (begin (displayln "a2" o) 5)])
+                3))
+             (get-output-string o))])
+  (test "b1\na1\nb2\na2\np1\n" values str))
 
 (test 1 'time (time 1))
 (test -1 'time (time (cons 1 2) -1))
@@ -2156,6 +2204,49 @@
    (syntax-property expanded-body-stx 'origin)))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Make sure that `strip-context` works on prefabs, hash tables, etc.
+
+(let ()
+  (define (same? a b)
+    (cond
+      [(syntax? a)
+       (and (syntax? b)
+            (equal? (for/hash ([k (in-list (hash-ref (syntax-debug-info a) 'context))])
+                      (values k #t))
+                    (for/hash ([k (in-list (hash-ref (syntax-debug-info b) 'context))])
+                      (values k #t)))
+            (same? (syntax-e a) (syntax-e b)))]
+      [(pair? a) (and (pair? b)
+                      (same? (car a) (car b))
+                      (same? (cdr a) (cdr b)))]
+      [(box? a) (and (box? b)
+                     (same? (unbox a) (unbox b)))]
+      [(vector? a) (and (vector? b)
+                        (= (vector-length a) (vector-length b))
+                        (for/and ([a (in-vector a)]
+                                  [b (in-vector b)])
+                          (same? a b)))]
+      [(hash? a) (and (eq? (hash-eq? a) (hash-eq? b))
+                      (eq? (hash-eqv? a) (hash-eqv? b))
+                      (eq? (hash-equal? a) (hash-equal? b))
+                      (for/and ([(ak av) (in-hash a)])
+                        (same? av (hash-ref b ak #f))))]
+      [(prefab-struct-key a)
+       => (lambda (ak)
+            (and (equal? ak (prefab-struct-key b))
+                 (same? (struct->vector a) (struct->vector b))))]
+      [else (eqv? a b)]))
+
+  (define (check v)
+    (same? (datum->syntax #f v)
+           (strip-context (datum->syntax #'here v))))
+
+  (test #t check '(a b))
+  (test #t check '#(a b #hash((c . 9))))
+  (test #t check '(#hasheqv((10 . 11) (12 . 13)) #&"str" #s(color r G #b0)))
+  (test #t check '(#hasheq((x . 11) (y . 13) (z . #f)) (1 . 2))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (module tries-to-use-foo-before-defined racket/base
   (provide result)
@@ -2254,6 +2345,15 @@
   (test #t procedure? (eval c))
   (err/rt-test (write c (open-output-bytes))
                exn:fail?))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Regression test to make sure `(set! ...)` on a local variable
+;; in the first position of ` begin0` is not miscompiled
+
+(test (void) (let ([i 0])
+               (λ () (begin0
+                       (set! i (add1 i))
+                       (+ i 1)))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

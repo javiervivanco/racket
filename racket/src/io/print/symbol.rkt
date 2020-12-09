@@ -1,5 +1,6 @@
 #lang racket/base
-(require "../port/string-output.rkt"
+(require racket/symbol
+         "../port/string-output.rkt"
          "../string/number.rkt"
          "write-with-max.rkt"
          "parameter.rkt"
@@ -32,6 +33,9 @@
              (char=? ch #\\)
              (char=? ch #\')
              (char=? ch #\,)
+             (char=? ch #\;)
+             (char=? ch #\`)
+             (char=? ch #\uFEFF) ; BOM, treated as whitespace by the reader
              (and (char=? ch #\|)
                   (or (not config) (config-get config read-accept-bar-quote)))
              (and for-type?

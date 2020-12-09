@@ -16,6 +16,10 @@
 (err/rt-test (thread (lambda (x) 8)) type?)
 (arity-test thread? 1 1)
 
+(test #f struct-predicate-procedure? thread?)
+(test #f struct-predicate-procedure? evt?)
+(test #f struct-type-property-predicate-procedure? evt?)
+
 ;; ----------------------------------------
 ;; Thread sets
 
@@ -175,6 +179,24 @@
 
 (err/rt-test (parameterize ([current-custodian cm]) (kill-thread (current-thread)))
 	     exn:application:mismatch?)
+
+;; Make sure a custodian is not retained just because there's
+;; a limit when it has no managed objects that can contribute
+;; to that limit
+(unless (eq? 'cgc (system-type 'gc))
+  (define c (make-custodian))
+  (define b (make-weak-box c))
+  (define c2 (make-custodian c))
+  (define cb (make-custodian-box c 'ok))
+  (define bb (make-weak-box cb))
+  (custodian-limit-memory c 10000000 c)
+  (set! c #f)
+  (set! c2 #f)
+  (set! cb #f)
+  (for ([i 3])
+    (collect-garbage))
+  (test #f weak-box-value b)
+  (test #f weak-box-value bb))
 
 (test #t custodian? cm)
 (test #f custodian? 1)
@@ -995,6 +1017,17 @@
      (goes (lambda () (sync (system-idle-evt))) (lambda () (sync (system-idle-evt))) kill-thread)))
  (list sleep void))
 
+;; Suspend and sleep
+(when (run-unreliable-tests? 'timing)
+  (let ([done? #f])
+    (define t (thread (lambda ()
+                        (sleep 0.1)
+                        (set! done? #t))))
+    (sync (system-idle-evt))
+    (thread-suspend t)
+    (sleep 0.1)
+    (test #f 'suspended-while-sleeping done?)))
+
 ;; ----------------------------------------
 ;;  Simple multi-custodian threads
 
@@ -1306,6 +1339,19 @@
       (collect-garbage)
       (plumber-flush-all c)
       (test 6 values done))))
+
+;; Make sure plumbers don't suffer a key-in-value leak:
+(unless (eq? 'cgc (system-type 'gc))
+  (define p (make-plumber))
+  (define fh
+    (plumber-add-flush! (current-plumber)
+                        (lambda (fh) p)
+                        ;; weak:
+                        #t))
+  (plumber-add-flush! p (lambda (fh2) fh))
+  (define wb (make-weak-box p))
+  (collect-garbage)
+  (test #f weak-box-value wb))
 
 ;; ----------------------------------------
 

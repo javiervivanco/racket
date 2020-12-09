@@ -8,8 +8,10 @@
          racket/list
          racket/set
          racket/path
+         ffi/unsafe/vm
          (only-in '#%linklet compiled-position->primitive)
-         "private/deserialize.rkt")
+         "private/deserialize.rkt"
+         "private/chez.rkt")
 
 (provide decompile)
 
@@ -82,7 +84,8 @@
                (list '#:key k '#:value (decompile v #:to-linklets? to-linklets?))]))))]
        [else
         (decompile-module top)])]
-    [(linkl? top)
+    [(or (linkl? top)
+         (linklet? top))
      (decompile-linklet top)]
     [(faslable-correlated-linklet? top)
      (strip-correlated (faslable-correlated-linklet-expr top))]
@@ -113,6 +116,7 @@
           [(faslable-correlated-linklet? l)
            (compile-linklet (strip-correlated (faslable-correlated-linklet-expr l))
                             (faslable-correlated-linklet-name l))]
+          [(linklet? l) l]
           [else
            (let ([o (open-output-bytes)])
              (zo-marshal-to (linkl-bundle (hasheq 'data l)) o)
@@ -186,7 +190,7 @@
              `((begin-for-all
                  (define (.get-syntax-literal! pos)
                    ....
-                   ,(decompile-data-linklet l)
+                   ,@(decompile-data-linklet l)
                    ....)))
              null))))
 
@@ -240,7 +244,32 @@
     [(struct faslable-correlated-linklet (expr name))
      (match (strip-correlated expr)
        [`(linklet ,imports ,exports ,body-l ...)
-        body-l])]))
+        body-l])]
+    [(? linklet?)
+     (case (system-type 'vm)
+       [(chez-scheme)
+        (define-values (fmt code literals) ((vm-primitive 'linklet-fasled-code+arguments) l))
+        (cond
+          [code
+           (case fmt
+             [(compile)
+              (cond
+                [(not (current-partial-fasl))
+                 (define proc (vm-eval `(load-compiled-from-port (open-bytevector-input-port ,code) ',literals)))
+                 (decompile-chez-procedure proc)]
+                [else
+                 (disassemble-in-description
+                  `(#(FASL
+                      #:length ,(bytes-length code)
+                      #:literals ,literals
+                      ,(vm-eval `(($primitive $describe-fasl-from-port) (open-bytevector-input-port ,code) ',literals)))))])]
+             [(interpret)
+              (define bytecode (vm-eval `(fasl-read (open-bytevector-input-port ,code) 'load ',literals)))
+              (list `(#%interpret ,(unwrap-chez-interpret-jitified bytecode)))]
+             [else
+              '(....)])]
+          [else
+           `(....)])])]))
 
 (define (decompile-data-linklet l)
   (match l
@@ -258,9 +287,9 @@
                                   num-shares share-vec
                                   mutable-fill-vec
                                   result-vec)]
-           [else
+           [_
             (decompile-linklet l)])]
-       [else
+       [_
         (decompile-linklet l)])]
     [(struct faslable-correlated-linklet (expr name))
      (match (strip-correlated expr)
@@ -283,9 +312,9 @@
                                num-shares share-vec
                                mutable-fill-vec
                                result-vec)]
-       [else
+       [_
         (decompile-linklet l)])]
-    [else
+    [_
      (decompile-linklet l)]))
      
 (define (decompile-form form globs stack closed)
@@ -306,7 +335,7 @@
      `(begin ,@(map (lambda (form)
                       (decompile-form form globs stack closed))
                     forms))]
-    [else
+    [_
      (decompile-expr form globs stack closed)]))
 
 (define (extract-name name)
@@ -324,7 +353,7 @@
      (extract-name name)]
     [(struct closure (lam gen-id))
      (extract-id lam)]
-    [else #f]))
+    [_ #f]))
 
 (define (extract-ids! body ids)
   (match body
@@ -338,7 +367,7 @@
      (extract-ids! body ids)]
     [(struct boxenv (pos body))
      (extract-ids! body ids)]
-    [else #f]))
+    [_ #f]))
 
 (define (decompile-tl expr globs stack closed no-check?)
   (match expr
@@ -417,10 +446,10 @@
        `(begin
           (set! ,id (#%box ,id))
           ,(decompile-expr body globs stack closed)))]
-    [(struct branch (test then else))
+    [(struct branch (test then els))
      `(if ,(decompile-expr test globs stack closed)
           ,(decompile-expr then globs stack closed)
-          ,(decompile-expr else globs stack closed))]
+          ,(decompile-expr els globs stack closed))]
     [(struct application (rator rands))
      (let ([stack (append (for/list ([i (in-list rands)]) (gensym 'rand))
                           stack)])
@@ -461,7 +490,7 @@
            (hash-set! closed gen-id #t)
            `(#%closed ,gen-id ,(decompile-expr lam globs stack closed))))]
     [(? void?) (list 'void)]
-    [else `(quote ,expr)]))
+    [_ `(quote ,expr)]))
 
 (define (decompile-lam expr globs stack closed)
   (match expr

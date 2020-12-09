@@ -151,6 +151,9 @@
   (err/rt-test (unsafe-fxmodulo (error "bad") 1) exn:fail?) ; not 0
   (err/rt-test (unsafe-fxmodulo 0 (error "bad")) exn:fail?) ; not 0
 
+  (test-bin 60 'unsafe-fxlshift 15 2)  
+  (test-bin 3 'unsafe-fxrshift 15 2)
+
   (test-zero 0.0 'unsafe-fl+)
   (test-un 6.7 'unsafe-fl+ 6.7)
   (test-bin 3.4 'unsafe-fl+ 1.4 2.0)
@@ -352,6 +355,20 @@
   (test-un 5.0 unsafe-flsqrt 25.0)
   (test-un 0.5 unsafe-flsqrt 0.25)
   (test-un +nan.0 unsafe-flsqrt -1.0)
+
+  (test-un 1.0 unsafe-flsingle 1.0)
+  (test-un -1.0 unsafe-flsingle -1.0)
+  (test-un +nan.0 unsafe-flsingle +nan.0)
+  (test-un +inf.0 unsafe-flsingle +inf.0)
+  (test-un -inf.0 unsafe-flsingle -inf.0)
+  (test-un 1.2500000360947476e38 unsafe-flsingle 1.25e38)
+  (test-un 1.2500000449239123e-37 unsafe-flsingle 1.25e-37)
+  (test-un -1.2500000360947476e38 unsafe-flsingle -1.25e38)
+  (test-un  -1.2500000449239123e-37 unsafe-flsingle -1.25e-37)
+  (test-un +inf.0 unsafe-flsingle 1e100)
+  (test-un -inf.0 unsafe-flsingle -1e100)
+  (test-un 0.0 unsafe-flsingle 1e-100)
+  (test-un -0.0 unsafe-flsingle -1e-100)
 
   (test-un 8.0 'unsafe-fx->fl 8)
   (test-un -8.0 'unsafe-fx->fl -8)
@@ -594,6 +611,12 @@
               #:post (lambda (x) (list x (bytes-ref v 2)))
               #:literal-ok? #f))
 
+  (let ([bstr (make-bytes 10)])
+    (test (void) unsafe-bytes-copy! bstr 1 #"testing" 2 6)
+    (test #"\0stin\0\0\0\0\0" values bstr)
+    (test (void) unsafe-bytes-copy! bstr 0 #"testing")
+    (test #"testing\0\0\0" values bstr))
+
   (test-bin #\5 'unsafe-string-ref "157" 1)
   (test-un 3 'unsafe-string-length "157")
   (let ([v (string #\0 #\3 #\7)])
@@ -824,8 +847,10 @@
   (let ()
     (define ht #f)
 
-    (let ([lst (build-list 10 add1)])
-      (set! ht (make-weak-hash `((,lst . val)))))
+    ;; retain the list at first...
+    (define lst (build-list 10 add1))
+
+    (set! ht (make-weak-hash `((,lst . val))))
 
     (define i (unsafe-weak-hash-iterate-first ht))
 
@@ -839,6 +864,10 @@
               (lambda () (unsafe-weak-hash-iterate-key+value ht i)) cons)
           '((1 2 3 4 5 6 7 8 9 10) . val))
     (test #t boolean? (unsafe-weak-hash-iterate-next ht i))
+
+    ;; drop `lst` on next GC
+    (test #t list? lst)
+    (set! lst #f)
 
     (unless (eq? 'cgc (system-type 'gc))
       ;; collect key, everything should error (but not segfault)
@@ -928,12 +957,22 @@
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check that constant folding doesn't go wrong for `unsafe-fxlshift`:
 
-(test #t fixnum? (if (eqv? 64 (system-type 'word))
-                     (unsafe-fxlshift 1 62)
-                     (unsafe-fxlshift 1 30)))
-(test #t zero? (if (eqv? 64 (system-type 'word))
-                   (unsafe-fxlshift 1 63)
-                   (unsafe-fxlshift 1 31)))
+(test #t procedure? (lambda ()
+                      (if (eqv? 64 (system-type 'word))
+                          (unsafe-fxlshift 1 60)
+                          (unsafe-fxlshift 1 28))))
+(test #t procedure? (lambda ()
+                      (if (eqv? 64 (system-type 'word))
+                          (unsafe-fxlshift 1 61)
+                          (unsafe-fxlshift 1 29))))
+(test #t procedure? (lambda ()
+                      (if (eqv? 64 (system-type 'word))
+                          (unsafe-fxlshift 1 62)
+                          (unsafe-fxlshift 1 30))))
+(test #t procedure? (lambda ()
+                      (if (eqv? 64 (system-type 'word))
+                          (unsafe-fxlshift 1 63)
+                          (unsafe-fxlshift 1 31))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check that allocation by inlined `unsafe-flrandom` is ok
@@ -959,6 +998,46 @@
             (if (and (eqv? a b) (eqv? b c))
                 'same
                 'diff)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(let ([bstr (make-bytes 5 65)]
+      [str (make-string 5 #\x)]
+      [vec (make-vector 5 'x)])
+  (let ([bstr (unsafe-bytes->immutable-bytes! bstr)]
+        [str (unsafe-string->immutable-string! str)]
+        [vec (unsafe-vector*->immutable-vector! vec)])
+    (test #t immutable? bstr)
+    (test #t immutable? str)
+    (test #t immutable? vec)
+    (test #t equal? #"AAAAA" bstr)
+    (test #t equal? "xxxxx" str)
+    (test #t equal? '#(x x x x x) vec)
+    (test #t immutable? (unsafe-bytes->immutable-bytes! (make-bytes 0)))
+    (test #f immutable? (make-bytes 0))
+    (test #t immutable? (unsafe-string->immutable-string! (make-string 0)))
+    (test #f immutable? (make-string 0))
+    (test #t immutable? (unsafe-vector*->immutable-vector! (make-vector 0)))
+    (test #f immutable? (make-vector 0))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Make sure `bitwise-{and,ior,xor}` are not converted to
+;; unsafe fixnum operations in `#:unsafe` mode
+
+(module unsafe-but-not-restricted-to-fixnum racket/base
+  (#%declare #:unsafe)
+  (provide band bior bxor)
+  (define (band x)
+    (bitwise-and #xFF x))
+  (define (bior x)
+    (bitwise-ior #xFF x))
+  (define (bxor x)
+    (bitwise-xor #xFF x)))
+
+(require 'unsafe-but-not-restricted-to-fixnum)
+(test #x55 band (+ #x5555 (expt 2 100)))
+(test (+ (expt 2 100) #x55FF) bior (+ #x5555 (expt 2 100)))
+(test (+ (expt 2 100) #x55AA) bxor (+ #x5555 (expt 2 100)))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

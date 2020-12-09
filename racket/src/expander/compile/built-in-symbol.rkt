@@ -59,6 +59,7 @@
                $value
                with-continuation-mark*
                pariah
+               begin-unsafe
                variable-set!
                variable-ref
                variable-ref/no-check
@@ -75,19 +76,20 @@
                call-with-module-prompt
                make-pthread-parameter
                engine-block
-               force-unfasl
                make-record-type-descriptor
+               make-record-type-descriptor*
                make-record-constructor-descriptor
                record-constructor
                record-accessor
                record-mutator
                record-predicate
                struct-type-install-properties!
-               register-struct-constructor!
-               register-struct-predicate!
-               register-struct-field-accessor!
-               register-struct-field-mutator!
+               #%struct-constructor
+               #%struct-predicate
+               #%struct-field-accessor
+               #%struct-field-mutator
                unsafe-struct?
+               unsafe-struct
                raise-binding-result-arity-error
                structure-type-lookup-prefab-uid
                struct-type-constructor-add-guards

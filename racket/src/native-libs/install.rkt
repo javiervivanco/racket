@@ -6,8 +6,22 @@
          racket/pretty
          "cmdline.rkt")
 
+(define sign-as #f)
+
+(define dest-dir
+  (build-command-line
+   #:once-each
+   [("--sign-as") id "Sign Mac OS X libraries"
+    (set! sign-as id)]
+   #:args (dest-dir)
+   dest-dir))
+
+;; Hack to make AArch64 Mac OS libraries look like other Macs:
+(define renames
+  `(("libffi.7" "libffi.6")))
+
 (define libs
-  '("libffi.6"
+  `("libffi.6"
     "libgio-2.0.0"
     "libgmodule-2.0.0"
     "libgthread-2.0.0"
@@ -42,10 +56,13 @@
     "libpangowin32-1.0.0"))
 
 (define mac-libs
-  '("PSMTabBarControl.framework"))
+  '("libedit.0"))
 
 (define mac64-libs
   '("MMTabBarView.framework"))
+
+(define macx86-libs
+  '("PSMTabBarControl.framework"))
 
 (define nonwin-libs
   '("libcrypto.1.1"
@@ -89,14 +106,14 @@
       "libgobject"
       "libgthread"
       ["libintl" "libintl is released under the GNU Library General Public License (GNU LGPL)."]
-      ["libharfbuzz" "HarfBuzz is relased under a MIT license."]
+      ["libharfbuzz" "HarfBuzz is released under a MIT license."]
       ["libfribidi" "FriBidi is released under the GNU Library General Public License (GNU LGPL)."]
       ["libpango" "Pango is released under the GNU Library General Public License (GNU LGPL)."]
       "libpangocairo"
       "libpangoft2"
       "libpangowin32"
       "libexpat"
-      ["libuuid" "libuuid is relased under a Modified BSD license."]
+      ["libuuid" "libuuid is released under a Modified BSD license."]
       ["libfontconfig" ,(~a "FontConfig:\n"
                             " Copyright © 2000,2001,2002,2003,2004,2006,2007 Keith Packard\n"
                             " Copyright © 2005 Patrick Lam\n"
@@ -104,9 +121,9 @@
                             " Copyright © 2008,2009 Red Hat, Inc.\n"
                             " Copyright © 2008 Danilo Šegan\n"
                             " Copyright © 2012 Google, Inc.")]
-      ["libfreetype" "Pixman is relased under the FreeType project license."]
+      ["libfreetype" "Pixman is released under the FreeType project license."]
       ["libcairo" "Cairo is released under the GNU Library General Public License (GNU LGPL)."]
-      ["libpixman" "Pixman is relased under a MIT license."]
+      ["libpixman" "Pixman is released under a MIT license."]
       ["libpng" "Libpng is released under the libpng license."]
       ["libjpeg" "This software is based in part on the work of the Independent JPEG Group."]
       ["zlib1" "zlib is by Jean-loup Gailly and Mark Adler."]
@@ -129,7 +146,10 @@
       ["libiconv-2" "libiconv is released under the GNU Lesser General Public License (GNU LGPL)."]
       ["longdouble" ,(~a "The source to longdouble is included with the Racket source code,\n"
                          "which is available from\n"
-                         "  http://www.racket-lang.org/")])]
+                         "  http://www.racket-lang.org/")]
+      ["libedit" ,(~a "This package includes libedit software developed for NetBSD under the\n"
+                      "NetBSD license.")])]
+
     ["math"
      ""
      "math"
@@ -175,7 +195,7 @@
      ""
      #t
      #f
-     "1.2" ; version
+     "1.3" ; version
      (["libgtk-x11-2.0.0" "GTK+ is released under the GNU Library General Public License (GNU LGPL)."]
       ["libatk" "ATK is released under the GNU Library General Public License (GNU LGPL)."]
       "libgdk-x11-2.0.0"
@@ -213,10 +233,11 @@
   (or (equal? p "fonts")
       (framework? p)))
 
-(define dest-dir
-  (build-command-line
-   #:args (dest-dir)
-   dest-dir))
+(define (revert-name p)
+  (or (for/or ([pr (in-list renames)])
+	(and (equal? (cadr pr) p)
+	     (car pr)))
+      p))
 
 (define from (build-path (current-directory) "dest" (if win? "bin" "lib")))
 
@@ -297,14 +318,10 @@
    (lambda (o)
      (displayln pkg-name o)
      (newline o)
-     (displayln "This package is distributed under the GNU Lesser General Public" o)
-     (displayln "License (LGPL).  This means that you can link this package into" o)
-     (displayln "proprietary applications, provided you follow the rules stated in the" o)
-     (displayln "LGPL.  You can also modify this package; if you distribute a modified" o)
-     (displayln "version, you must distribute it under the terms of the LGPL, which in" o)
-     (displayln "particular means that you must release the source code for the" o)
-     (displayln "modified software.  See http://www.gnu.org/copyleft/lesser.html" o)
-     (displayln "for more information." o)
+     (displayln "This package is distributed under the Apache 2.0 and MIT licenses. The" o)
+     (displayln "user can choose the license under which they will be using the" o)
+     (displayln "software. There may be other licenses within the distribution with" o)
+     (displayln "which the user must also comply." o)
      (for ([l (in-list lics)])
        (newline o)
        (displayln l o))
@@ -315,10 +332,15 @@
   (define pkgs-lic (make-hash))
 
   (define (install lib)
-    (define p (cond
-               [(plain-path? lib) lib]
-               [(procedure? so) (so lib)]
-               [else (format "~a.~a" lib so)]))
+    (define-values (p orig-p)
+      (let ()
+	(define (both v) (values v v))
+	(cond
+	 [(plain-path? lib) (both lib)]
+	 [(procedure? so) (both (so lib))]
+	 [else
+	  (define (make lib) (format "~a.~a" lib so))
+	  (values (make lib) (make (revert-name lib)))])))
     (define-values (pkg suffix subdir lic) (find-pkg lib))
     (define dir (build-path dest-dir
                             (~a pkg "-" platform suffix)
@@ -330,7 +352,7 @@
       (cond
         [(file-exists? dest) (delete-file dest)]
         [(directory-exists? dest) (delete-directory/files dest)])
-      (define src (build-path from p))
+      (define src (build-path from orig-p))
       (if (directory-exists? src)
           (copy-directory/files src dest)
           (copy-file src dest)))
@@ -360,23 +382,35 @@
   (define (fixup p p-new)
     (unless (framework? p)
       (printf "Fixing ~s\n" p-new)
+      (when aarch64?
+	(system (format "codesign --remove-signature ~a" p-new)))
       (unless (memq 'write (file-or-directory-permissions p-new))
         (file-or-directory-permissions p-new #o744))
       (system (format "install_name_tool -id ~a ~a" (file-name-from-path p-new) p-new))
       (for-each (lambda (s)
                   (system (format "install_name_tool -change ~a @loader_path/~a ~a"
-                                  (format "~a/~a.dylib" from s)
+                                  (format "~a/~a.dylib" from (revert-name s))
                                   (format "~a.dylib" s)
                                   p-new)))
                 (append libs nonwin-libs))
-      (system (format "strip -S ~a" p-new))))
+      (system (format "strip -S ~a" p-new))
+      (when sign-as
+	(system (format "codesign -s ~s --timestamp ~a" sign-as p-new)))))
 
   (define platform (~a (if m32? 
                            (if ppc? "ppc" "i386")
-                           "x86_64")
+			   (if aarch64? "aarch64" "x86_64"))
                        "-macosx"))
 
-  (install platform platform "dylib" fixup (append libs mac-libs (if m32? '() mac64-libs) nonwin-libs)))
+  (install platform platform "dylib" fixup (append libs
+                                                   mac-libs
+                                                   (cond
+                                                     [m32? '()]
+                                                     [else mac64-libs])
+                                                   (cond
+                                                     [aarch64? '()]
+                                                     [else macx86-libs])
+                                                   nonwin-libs)))
 
 (define (install-win)
   (define exe-prefix (if m32?

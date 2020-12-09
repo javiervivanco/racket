@@ -8,6 +8,7 @@
          ffi/unsafe/alloc
          ffi/unsafe/define
          ffi/unsafe/define/conventions
+         ffi/unsafe/global
          ffi/vector
          racket/extflonum
          racket/place
@@ -156,6 +157,18 @@
   (check s 'c 14)
   (check s 'd 16))
 
+(let ([_bm _bitmask])
+  (let ([s (_bm '(a b c = 14 d))])
+    (test 2 values (cast 'b s _int))))
+
+(let ()
+  (define _test32_enum (_enum `(TEST32 = 1073741906) _sint32))
+  (define _test64_enum (_enum `(TEST64 = 4611686018427387904) _sint64))
+  (test 1073741906 cast 'TEST32 _test32_enum _sint32)
+  (test 'TEST32 cast 1073741906 _sint32 _test32_enum)
+  (test 4611686018427387904 cast  'TEST64 _test64_enum _sint64)
+  (test 'TEST64 cast 4611686018427387904 _sint64 _test64_enum))
+
 ;; Make sure `_box` at least compiles:
 (test #t ctype? (_fun (_box _int) -> _void))
 
@@ -278,12 +291,8 @@
         ((ffi 'hoho (_fun _int (_fun _int -> (_fun _int -> _int)) -> _int))
          3 (lambda (x) (lambda (y) (+ y (* x x))))))
   ;; ---
-  ;; FIXME: this test is broken, because the array allocated by `(_list io _int len)`
-  ;; has no reason to stay in place; a GC during the callback may move it.
-  ;; The solution is probably to extend `_list` so that an allocation mode like
-  ;; 'atomic-interior can be supplied.
   (let ([qsort (get-ffi-obj 'qsort #f
-                            (_fun (l    : (_list io _int len))
+                            (_fun (l    : (_list io _int len atomic-interior))
                                   (len  : _int = (length l))
                                   (size : _int = (ctype-sizeof _int))
                                   (compare : (_fun _pointer _pointer -> _int))
@@ -391,6 +400,7 @@
         (let ([ic7i-3 ((ffi 'ic7i_cb (_fun _ic7i (_fun _ic7i -> _ic7i) -> _ic7i))
                        ic7i
                        (lambda (ic7i-4)
+                         (collect-garbage 'minor)
                          (test 12 ic7i-i1 ic7i-4)
                          (test (cons 255 (map sub1 (cdr v))) ic7i-c7 ic7i-4)
                          (test 13 ic7i-i2 ic7i-4)
@@ -575,6 +585,11 @@
 		  free)])
     (free p)))
 
+(let ([return_null (get-ffi-obj 'return_null test-lib (_fun -> _bytes/nul-terminated))])
+  (test #f return_null))
+(let ([return_null (get-ffi-obj 'return_null test-lib (_fun -> (_bytes/nul-terminated o 20)))])
+  (test #f return_null))
+
 ;; Test equality and hashing of c pointers:
 (let ([seventeen1 (cast 17 _intptr _pointer)]
       [seventeen2 (cast 17 _intptr _pointer)]
@@ -734,6 +749,9 @@
 (when (eq? 'racket (system-type 'vm))
   ;; Check a corner of UTF-16 conversion:
   (test "\U171D3" cast (cast "\U171D3" _string/utf-16 _gcpointer) _gcpointer _string/utf-16))
+
+;; strings can be cast
+(test "heλλo" cast (cast "he\u3bb\u3bbo" _string/utf-16 _gcpointer) _gcpointer _string/utf-16)
 
 ;; check async:
 (when test-async?
@@ -1133,6 +1151,22 @@
 (test 17 serializable-example-1-a (deserialize (serialize (make-serializable-example-1 17))))
 
 ;; ----------------------------------------
+;; Check that `i`, `o`, and `io` are matched as symbols, not by binding:
+
+(let ([i 'no]
+      [o 'no]
+      [io 'no])
+  (test #t ctype? (_ptr i _int))
+  (test #t ctype? (_ptr o _int))
+  (test #t ctype? (_ptr io _int))
+  (test #t ctype? (_list i _int))
+  (test #t ctype? (_list o _int 10))
+  (test #t ctype? (_list io _int 10))
+  (test #t ctype? (_vector i _int))
+  (test #t ctype? (_vector o _int 10))
+  (test #t ctype? (_vector io _int 10)))
+
+;; ----------------------------------------
 
 (define-cpointer-type _foo)
 (test 'foo? object-name foo?)
@@ -1150,118 +1184,129 @@
 ;; ----------------------------------------
 ;; Test JIT inlining
 
-(define bstr (cast (make-bytes 64) _pointer _pointer))
+(define (test-ptr-jit-inline bstr)
+  (for/fold ([v 1.0]) ([i (in-range 100)])
+    (ptr-set! bstr _float v)
+    (ptr-set! bstr _float 1 (+ v 0.5))
+    (ptr-set! bstr _float 'abs 8 (+ v 0.25))
+    (unless (= v (ptr-ref bstr _float))
+      (error 'float "failed"))
+    (unless (= (+ v 0.5) (ptr-ref bstr _float 'abs 4))
+      (error 'float "failed(2) ~s ~s" (+ v 0.5) (ptr-ref bstr _float 'abs 4)))
+    (unless (= (+ v 0.25) (ptr-ref bstr _float 2))
+      (error 'float "failed(3)"))
+    (+ 1.0 v))
 
-(for/fold ([v 1.0]) ([i (in-range 100)])
-  (ptr-set! bstr _float v)
-  (ptr-set! bstr _float 1 (+ v 0.5))
-  (ptr-set! bstr _float 'abs 8 (+ v 0.25))
-  (unless (= v (ptr-ref bstr _float))
-    (error 'float "failed"))
-  (unless (= (+ v 0.5) (ptr-ref bstr _float 'abs 4))
-    (error 'float "failed(2) ~s ~s" (+ v 0.5) (ptr-ref bstr _float 'abs 4)))
-  (unless (= (+ v 0.25) (ptr-ref bstr _float 2))
-    (error 'float "failed(3)"))
-  (+ 1.0 v))
+  (for/fold ([v 1.0]) ([i (in-range 100)])
+    (ptr-set! bstr _double v)
+    (ptr-set! bstr _double 1 (+ v 0.5))
+    (ptr-set! bstr _double 'abs 16 (+ v 0.25))
+    (ptr-set! (ptr-add bstr 24) _double (+ v 0.125))
+    (unless (= v (ptr-ref bstr _double))
+      (error 'double "failed"))
+    (unless (= (+ v 0.5) (ptr-ref bstr _double 'abs 8))
+      (error 'double "failed(2)"))
+    (unless (= (+ v 0.25) (ptr-ref bstr _double 2))
+      (error 'double "failed(3)"))
+    (unless (= (+ v 0.5) (ptr-ref (ptr-add bstr 8) _double))
+      (error 'double "failed(4)"))
+    (unless (= (+ v 0.125) (ptr-ref (ptr-add bstr 24) _double))
+      (error 'double "failed(5)"))
+    (+ 1.0 v))
 
-(for/fold ([v 1.0]) ([i (in-range 100)])
-  (ptr-set! bstr _double v)
-  (ptr-set! bstr _double 1 (+ v 0.5))
-  (ptr-set! bstr _double 'abs 16 (+ v 0.25))
-  (unless (= v (ptr-ref bstr _double))
-    (error 'double "failed"))
-  (unless (= (+ v 0.5) (ptr-ref bstr _double 'abs 8))
-    (error 'double "failed(2)"))
-  (unless (= (+ v 0.25) (ptr-ref bstr _double 2))
-    (error 'double "failed(3)"))
-  (+ 1.0 v))
+  (for ([i (in-range 256)])
+    (ptr-set! bstr _uint8 i)
+    (ptr-set! bstr _uint8 1 (- 255 i))
+    (unless (= i (ptr-ref bstr _uint8))
+      (error 'uint8 "fail ~s vs. ~s" i (ptr-ref bstr _uint8)))
+    (unless (= (- 255 i) (ptr-ref bstr _uint8 'abs 1))
+      (error 'uint8 "fail(2) ~s vs. ~s" (- 255 i) (ptr-ref bstr _uint8 'abs 1))))
 
-(for ([i (in-range 256)])
-  (ptr-set! bstr _uint8 i)
-  (ptr-set! bstr _uint8 1 (- 255 i))
-  (unless (= i (ptr-ref bstr _uint8))
-    (error 'uint8 "fail ~s vs. ~s" i (ptr-ref bstr _uint8)))
-  (unless (= (- 255 i) (ptr-ref bstr _uint8 'abs 1))
-    (error 'uint8 "fail(2) ~s vs. ~s" (- 255 i) (ptr-ref bstr _uint8 'abs 1))))
+  (for ([i (in-range -128 128)])
+    (ptr-set! bstr _int8 i)
+    (unless (= i (ptr-ref bstr _int8))
+      (error 'int8 "fail ~s vs. ~s" i (ptr-ref bstr _int8))))
 
-(for ([i (in-range -128 128)])
-  (ptr-set! bstr _int8 i)
-  (unless (= i (ptr-ref bstr _int8))
-    (error 'int8 "fail ~s vs. ~s" i (ptr-ref bstr _int8))))
+  (for ([i (in-range (expt 2 16))])
+    (ptr-set! bstr _uint16 i)
+    (ptr-set! bstr _uint16 3 (- (sub1 (expt 2 16)) i))
+    (unless (= i (ptr-ref bstr _uint16))
+      (error 'uint16 "fail ~s vs. ~s" i (ptr-ref bstr _uint16)))
+    (unless (= (- (sub1 (expt 2 16)) i) (ptr-ref bstr _uint16 'abs 6))
+      (error 'uint16 "fail(2) ~s vs. ~s" (- (sub1 (expt 2 16)) i) (ptr-ref bstr _uint16 'abs 6))))
 
-(for ([i (in-range (expt 2 16))])
-  (ptr-set! bstr _uint16 i)
-  (ptr-set! bstr _uint16 3 (- (sub1 (expt 2 16)) i))
-  (unless (= i (ptr-ref bstr _uint16))
-    (error 'uint16 "fail ~s vs. ~s" i (ptr-ref bstr _uint16)))
-  (unless (= (- (sub1 (expt 2 16)) i) (ptr-ref bstr _uint16 'abs 6))
-    (error 'uint16 "fail(2) ~s vs. ~s" (- (sub1 (expt 2 16)) i) (ptr-ref bstr _uint16 'abs 6))))
+  (for ([j (in-range 100)])
+    (for ([i (in-range (- (expt 2 15)) (sub1 (expt 2 15)))])
+      (ptr-set! bstr _int16 i)
+      (unless (= i (ptr-ref bstr _int16))
+        (error 'int16 "fail ~s vs. ~s" i (ptr-ref bstr _int16)))))
 
-(for ([j (in-range 100)])
-  (for ([i (in-range (- (expt 2 15)) (sub1 (expt 2 15)))])
-    (ptr-set! bstr _int16 i)
-    (unless (= i (ptr-ref bstr _int16))
-      (error 'int16 "fail ~s vs. ~s" i (ptr-ref bstr _int16)))))
+  (let ()
+    (define (go lo hi)
+      (for ([i (in-range lo hi)])
+        (ptr-set! bstr _uint32 i)
+        (ptr-set! bstr _uint32 1 (- hi (- i lo) 1))
+        (unless (= i (ptr-ref bstr _uint32))
+          (error 'uint32 "fail ~s vs. ~s" i (ptr-ref bstr _uint32)))
+        (unless (= (- hi (- i lo) 1) (ptr-ref bstr _uint32 'abs 4))
+          (error 'uint32 "fail ~s vs. ~s" (- hi (- i lo) 1) (ptr-ref bstr _uint32)))))
+    (go 0 256)
+    (go (- (expt 2 31) 256) (+ (expt 2 31) 256))
+    (go (- (expt 2 32) 256) (expt 2 32)))
+
+  (let ()
+    (define (go lo hi)
+      (for ([i (in-range lo hi)])
+        (ptr-set! bstr _int32 i)
+        (unless (= i (ptr-ref bstr _int32))
+          (error 'int32 "fail ~s vs. ~s" i (ptr-ref bstr _int32)))))
+    (go -256 256)
+    (go (- (expt 2 31) 256) (sub1 (expt 2 31)))
+    (go (- (expt 2 31)) (- 256 (expt 2 31))))
+
+  (let ()
+    (define (go lo hi)
+      (for ([i (in-range lo hi)])
+        (ptr-set! bstr _uint64 i)
+        (ptr-set! bstr _uint64 1 (- hi (- i lo) 1))
+        (unless (= i (ptr-ref bstr _uint64))
+          (error 'uint64 "fail ~s vs. ~s" i (ptr-ref bstr _uint64)))
+        (unless (= (- hi (- i lo) 1) (ptr-ref bstr _uint64 'abs 8))
+          (error 'uint32 "fail ~s vs. ~s" (- hi (- i lo) 1) (ptr-ref bstr _uint64)))))
+    (go 0 256)
+    (go (- (expt 2 63) 256) (+ (expt 2 63) 256))
+    (go (- (expt 2 64) 256) (expt 2 64)))
+
+  (let ()
+    (define (go lo hi)
+      (for ([i (in-range lo hi)])
+        (ptr-set! bstr _int64 i)
+        (unless (= i (ptr-ref bstr _int64))
+          (error 'int64 "fail ~s vs. ~s" i (ptr-ref bstr _int64)))))
+    (go -256 256)
+    (go (- (expt 2 63) 256) (sub1 (expt 2 63)))
+    (go (- (expt 2 63)) (- 256 (expt 2 63))))
+
+  (let ()
+    (define p (cast bstr _pointer _pointer))
+    (for ([i (in-range 100)])
+      (ptr-set! bstr _pointer (ptr-add p i))
+      (ptr-set! bstr _pointer 2 p)
+      (unless (ptr-equal? p (ptr-add (ptr-ref bstr _pointer) (- i)))
+        (error 'pointer "fail ~s vs. ~s"
+               (cast p _pointer _intptr)
+               (cast (ptr-ref bstr _pointer) _pointer _intptr)))
+      (unless (ptr-equal? p (ptr-ref bstr _pointer 'abs (* 2 (ctype-sizeof _pointer))))
+        (error 'pointer "fail ~s vs. ~s"
+               (cast p _pointer _intptr)
+               (cast (ptr-ref bstr _pointer 'abs (ctype-sizeof _pointer)) _pointer _intptr))))))
 
 (let ()
-  (define (go lo hi)
-    (for ([i (in-range lo hi)])
-      (ptr-set! bstr _uint32 i)
-      (ptr-set! bstr _uint32 1 (- hi (- i lo) 1))
-      (unless (= i (ptr-ref bstr _uint32))
-        (error 'uint32 "fail ~s vs. ~s" i (ptr-ref bstr _uint32)))
-      (unless (= (- hi (- i lo) 1) (ptr-ref bstr _uint32 'abs 4))
-        (error 'uint32 "fail ~s vs. ~s" (- hi (- i lo) 1) (ptr-ref bstr _uint32)))))
-  (go 0 256)
-  (go (- (expt 2 31) 256) (+ (expt 2 31) 256))
-  (go (- (expt 2 32) 256) (expt 2 32)))
-
-(let ()
-  (define (go lo hi)
-    (for ([i (in-range lo hi)])
-      (ptr-set! bstr _int32 i)
-      (unless (= i (ptr-ref bstr _int32))
-        (error 'int32 "fail ~s vs. ~s" i (ptr-ref bstr _int32)))))
-  (go -256 256)
-  (go (- (expt 2 31) 256) (sub1 (expt 2 31)))
-  (go (- (expt 2 31)) (- 256 (expt 2 31))))
-
-(let ()
-  (define (go lo hi)
-    (for ([i (in-range lo hi)])
-      (ptr-set! bstr _uint64 i)
-      (ptr-set! bstr _uint64 1 (- hi (- i lo) 1))
-      (unless (= i (ptr-ref bstr _uint64))
-        (error 'uint64 "fail ~s vs. ~s" i (ptr-ref bstr _uint64)))
-      (unless (= (- hi (- i lo) 1) (ptr-ref bstr _uint64 'abs 8))
-        (error 'uint32 "fail ~s vs. ~s" (- hi (- i lo) 1) (ptr-ref bstr _uint64)))))
-  (go 0 256)
-  (go (- (expt 2 63) 256) (+ (expt 2 63) 256))
-  (go (- (expt 2 64) 256) (expt 2 64)))
-
-(let ()
-  (define (go lo hi)
-    (for ([i (in-range lo hi)])
-      (ptr-set! bstr _int64 i)
-      (unless (= i (ptr-ref bstr _int64))
-        (error 'int64 "fail ~s vs. ~s" i (ptr-ref bstr _int64)))))
-  (go -256 256)
-  (go (- (expt 2 63) 256) (sub1 (expt 2 63)))
-  (go (- (expt 2 63)) (- 256 (expt 2 63))))
-
-(let ()
-  (define p (cast bstr _pointer _pointer))
-  (for ([i (in-range 100)])
-    (ptr-set! bstr _pointer (ptr-add p i))
-    (ptr-set! bstr _pointer 2 p)
-    (unless (ptr-equal? p (ptr-add (ptr-ref bstr _pointer) (- i)))
-      (error 'pointer "fail ~s vs. ~s"
-             (cast p _pointer _intptr)
-             (cast (ptr-ref bstr _pointer) _pointer _intptr)))
-    (unless (ptr-equal? p (ptr-ref bstr _pointer 'abs (* 2 (ctype-sizeof _pointer))))
-      (error 'pointer "fail ~s vs. ~s"
-             (cast p _pointer _intptr)
-             (cast (ptr-ref bstr _pointer 'abs (ctype-sizeof _pointer)) _pointer _intptr)))))
+  (test-ptr-jit-inline (make-bytes 64))
+  (test-ptr-jit-inline (cast (make-bytes 64) _pointer _pointer))
+  (let ([p (malloc 'raw 64)])
+    (test-ptr-jit-inline p)
+    (free p)))
 
 ;; ----------------------------------------
 
@@ -1346,6 +1391,19 @@
                                        _FcMatrix-pointer
                                        _FcCharSet)]))
   (malloc _FcValue))
+
+;; ----------------------------------------
+
+(let* ([bstr (string->bytes/utf-8 (format "~a ~a" (current-inexact-milliseconds) (random)))]
+       [orig-bstr (bytes-copy bstr)])
+  (err/rt-test (register-process-global 7 8))
+  (err/rt-test (register-process-global "7" 8))
+  (test #f register-process-global bstr #f)
+  (test #f register-process-global bstr #"data\0")
+  (test #"data" cast (register-process-global bstr #f) _pointer _bytes)
+  (bytes-set! bstr 0 65)
+  (test #f register-process-global bstr #f)
+  (test #"data" cast (register-process-global orig-bstr #"data\0") _pointer _bytes))
 
 ;; ----------------------------------------
 

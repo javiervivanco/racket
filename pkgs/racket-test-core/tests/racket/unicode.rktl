@@ -1194,6 +1194,10 @@
       (stest #f string>? "b" "\uE2")
       (stest (if c? #f #t) string-locale>? "b" "\uE2")
       (test "ABC" string-locale-upcase "aBc")
+      (test "" string-locale-downcase "")
+      (test "a" string-locale-downcase "A")
+      (test "" string-locale-upcase "")
+      (test "A" string-locale-upcase "a")
       (test (if c? "\uE2" "\uC2") string-locale-upcase "\uE2")
       (test (if c? "A\uE2\0B" "A\uC2\0B") string-locale-upcase "a\uE2\0b")
       (test (if c? "A\uE2\0\uE2\0B" "A\uC2\0\uC2\0B") string-locale-upcase "a\uE2\0\uE2\0b"))
@@ -1693,6 +1697,8 @@
 (test "X\u03C2" string-titlecase "x\u03A3")
 (test "\u039A\u03b1\u03BF\u03C3\u03C2" string-titlecase "\u039A\u0391\u039F\u03A3\u03A3")
 (test "\u039A\u03b1\u03BF\u03C2 X" string-titlecase "\u039A\u0391\u039F\u03A3 x")
+
+(test "\xDF\xDF" string-downcase  "\u1E9E\xDF")
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Bytes converters and custodians - check that built-in conversions are

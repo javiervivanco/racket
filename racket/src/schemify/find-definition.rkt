@@ -11,7 +11,7 @@
 
 ;; Record top-level functions and structure types, and returns
 ;;  (values knowns struct-type-info-or-#f)
-(define (find-definitions v prim-knowns knowns imports mutated simples unsafe-mode?
+(define (find-definitions v prim-knowns knowns imports mutated simples unsafe-mode? target
                           #:primitives [primitives #hasheq()] ; for `optimize?` mode
                           #:optimize? optimize?)
   (match v
@@ -20,7 +20,7 @@
                      (optimize orig-rhs prim-knowns primitives knowns imports mutated)
                      orig-rhs))
      (values
-      (let ([k (infer-known rhs v id knowns prim-knowns imports mutated simples unsafe-mode?
+      (let ([k (infer-known rhs v id knowns prim-knowns imports mutated simples unsafe-mode? target
                             #:primitives primitives
                             #:optimize-inline? optimize?)])
         (if k
@@ -43,11 +43,11 @@
        (let* ([knowns (hash-set knowns
                                 (unwrap make-s)
                                 (if (struct-type-info-pure-constructor? info)
-                                    (known-constructor (arithmetic-shift 1 (struct-type-info-field-count info)) type)
+                                    (known-struct-constructor (arithmetic-shift 1 (struct-type-info-field-count info)) type struct:s)
                                     a-known-constant))]
               [knowns (hash-set knowns
                                 (unwrap s?)
-                                (known-predicate 2 type))]
+                                (known-struct-predicate 2 type struct:s (struct-type-info-authentic? info)))]
               [knowns
                (let* ([immediate-count (struct-type-info-immediate-field-count info)]
                       [parent-count (- (struct-type-info-field-count info)
@@ -87,7 +87,7 @@
                                      a-known-constant))]
                [knowns (hash-set knowns
                                  (unwrap s?)
-                                 (known-predicate 2 type))])
+                                 (known-struct-predicate 2 type struct:s (struct-type-info-authentic? info)))])
           ;; For now, we don't try to track the position-consuming accessor or mutator
           (hash-set knowns (unwrap struct:s) (known-struct-type type
                                                                 (struct-type-info-field-count info)
@@ -120,7 +120,7 @@
                                            [rhs (in-list rhss)])
                 (define-values (new-knowns info)
                   (find-definitions `(define-values (,id) ,rhs)
-                                    prim-knowns knowns imports mutated simples unsafe-mode?
+                                    prim-knowns knowns imports mutated simples unsafe-mode? target
                                     #:optimize? optimize?))
                 new-knowns)
               #f)]

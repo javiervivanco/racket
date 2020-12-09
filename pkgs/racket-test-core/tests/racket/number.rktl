@@ -179,6 +179,8 @@
 (test "+nan.0" number->string +nan.0)
 (test "+nan.0" number->string +nan.0)
 
+(test "1589935744527.254" number->string 1589935744527.254)
+
 #reader "maybe-single.rkt"
 (begin
   (test (if has-single-flonum? "+inf.f" "+inf.0") number->string +inf.f)
@@ -603,6 +605,23 @@
 (when has-single-flonum?
   (test +inf.f expt -4.0f0 (lcm (exact-round -1.7976931348623151e+308)))
   (test -inf.f expt -4.0f0 (add1 (lcm (exact-round -1.7976931348623151e+308)))))
+
+(test  5.540619075645279e+34 expt   1.000000000000001 (expt 2 56))
+(test  5.540619075645279e+34 expt  -1.000000000000001 (expt 2 56))
+(test -5.5406190756452855e+34 expt -1.000000000000001 (add1 (expt 2 56)))
+
+(let ()
+  (define nrs (list -inf.0 -2.0 -1.0 -0.5 -0.0 0.0 0.5 1.0 2.0 +inf.0))
+  (define (neg-even nr) (- (- nr) 1))
+  (define (neg-odd nr) (- nr))
+  (define (pos-even nr) (+ nr 1))
+  (define (pos-odd nr) nr)
+  (for ([base (in-list nrs)])
+    (for ([make-exponent (in-list (list neg-even neg-odd pos-even pos-odd))])
+      (define L
+        (for/list ([i (in-list '(14 150 350))])
+          (expt base (make-exponent (string->number (build-string i (λ (i) #\1)))))))
+      (test #t `(,base ,L) (apply = L)))))
 
 (define (inf-non-real? x)
   (and (not (real? x))
@@ -1091,6 +1110,19 @@
 (err/rt-test (modulo 6 -0.0) exn:fail:contract:divide-by-zero?)
 (err/rt-test (remainder 6 -0.0) exn:fail:contract:divide-by-zero?)
 
+(let ()
+  (define (check-rem-mod a b rem mod)
+    (test rem remainder a b)
+    (test rem remainder (inexact->exact a) b)
+    (test rem remainder a (inexact->exact b))
+    (test mod modulo a b)
+    (test mod modulo (inexact->exact a) b)
+    (test mod modulo a (inexact->exact b)))
+  (check-rem-mod 5.842423430828094e+60 10.0 4.0 4.0)
+  (check-rem-mod 5.842423430828094e+60 -10.0 4.0 -6.0)
+  (check-rem-mod -5.842423430828094e+60 10.0 -4.0 6.0)
+  (check-rem-mod -5.842423430828094e+60 -10.0 -4.0 -4.0))
+
 (define (test-qrm-inf v)
   (define iv (exact->inexact v))
 
@@ -1289,14 +1321,20 @@
   (test 0 arithmetic-shift 42 (+ i (- (expt 2 31))))
   (test 0 arithmetic-shift 42 (+ i (- (expt 2 63)))))
 
+(test 0 arithmetic-shift 0 (expt 2 100))
+(test 0 arithmetic-shift 0 (- (expt 2 100)))
+(test 0 arithmetic-shift 1 (- (expt 2 100)))
+(test 0 arithmetic-shift (expt 2 100) (- (expt 2 100)))
+(test -1 arithmetic-shift -1 (- (expt 2 100)))
+(test -1 arithmetic-shift (- (expt 2 100)) (- (expt 2 100)))
+
 (arity-test arithmetic-shift 2 2)
 (err/rt-test (arithmetic-shift "a" 1))
 (err/rt-test (arithmetic-shift 1 "a"))
 (err/rt-test (arithmetic-shift 1.0 1))
 (err/rt-test (arithmetic-shift 1 1.0))
 (err/rt-test (arithmetic-shift 1 1.0+0.0i))
-(unless (eq? 'chez-scheme (system-type 'vm))
-  (err/rt-test (eval '(arithmetic-shift 1 (expt 2 80))) exn:fail:out-of-memory?))
+(err/rt-test (eval '(arithmetic-shift 1 (expt 2 80))) exn:fail:out-of-memory?)
 
 (test #f bitwise-bit-set? 13 1)
 (test #t bitwise-bit-set? 13 2)
@@ -1445,6 +1483,10 @@
 (test 6 lcm 1/3 2/5 3/7)
 (test 3.0 lcm 0.5 3)
 (test 3.0 lcm 1/2 3.0)
+
+(test 4611686018427387904 gcd -4611686018427387904)
+(test 4611686018427387904 gcd -4611686018427387904 -4611686018427387904)
+(test 4611686018427387904 gcd -4611686018427387904 0)
 
 (err/rt-test (gcd +nan.0))
 (err/rt-test (gcd +inf.0))
@@ -2235,6 +2277,14 @@
 (test 1.0 exp -0.0)
 (test 272.0 round (* 100 (exp 1)))
 
+;; should not be NaN
+(test +inf.0+0.0i exp 10000000.0+0.0i)
+(test +inf.0-0.0i exp 10000000.0-0.0i)
+#reader "maybe-single.rkt"
+(when has-single-flonum?
+  (test +inf.f+0.0f0i exp +100000.0f0+0.0f0i)
+  (test +inf.f-0.0f0i exp +100000.0f0-0.0f0i))
+
 (test 0 log 1)
 (test 0.0 log 1.0)
 (test -inf.0 log 0.0)
@@ -2703,6 +2753,10 @@
   (test '#(1062645402 3593208522 3838676319 2291995347 179540564 3081399108)
         pseudo-random-generator->vector (current-pseudo-random-generator)))
 
+(test 1110944503
+      random 4294967087 (vector->pseudo-random-generator
+                         '#(2182378604 1199273501 1921976687 2184096762 3398188531 1221198170)))
+
 (test #t = 0 0)
 (test #f = 0 (expt 2 32))
 (test #f = (expt 2 32) 0)
@@ -2899,16 +2953,20 @@
 (test 121 integer-length (+ (expt 2 120) 1))
 
 (define (avoid-big-allocation?)
-  ;; A Raspberry Pi running Linux is a likely too-small device,
-  ;; so at least detect that one:
-  (and (file-exists? "/proc/meminfo")
-       (call-with-input-file*
-        "/proc/meminfo"
-        (lambda (i)
-          (define m (regexp-match #rx"MemTotal: +([0-9]+) kB" i))
-          (and m
-               (< (string->number (bytes->string/utf-8 (cadr m)))
-                  (* 1.5 1024 1024)))))))
+  (or
+   ;; A Raspberry Pi running Linux is a likely too-small device,
+   ;; so at least detect that one:
+   (and (file-exists? "/proc/meminfo")
+        (call-with-input-file*
+         "/proc/meminfo"
+         (lambda (i)
+           (define m (regexp-match #rx"MemTotal: +([0-9]+) kB" i))
+           (and m
+                (< (string->number (bytes->string/utf-8 (cadr m)))
+                   (* 1.5 1024 1024))))))
+   ;; If (sub1 (expt 2 31)) is a bignum, then `expt` will likely give
+   ;; up
+   (not (fixnum? (sub1 (expt 2 31))))))
 
 (unless (avoid-big-allocation?)
   ; don't attempt to print numbers that are billions of bits long
@@ -3494,7 +3552,7 @@
                 extra-p))
     (define n3 (inexact->exact (exact->inexact n2)))
     (unless (= n3 (arithmetic-shift 53-bit-number (+ num-zeros 1 extra-p)))
-      (error 'random-exact->inexact "truncating round failed ~s" n2)))
+      (error 'random-exact->inexact "truncating round failed ~s ~s ~s" n2 53-bit-number (+ num-zeros 1 extra-p))))
   (check-random-pairs check-shift-plus-bits-to-truncate)
   
   ;; If we add a one bit and then a non-zero bit anywhere later,

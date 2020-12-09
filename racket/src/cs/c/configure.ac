@@ -12,24 +12,25 @@ AC_CANONICAL_SYSTEM
 
 AC_DISABLE_OPTION_CHECKING
 
-AC_ARG_ENABLE(shared,     [  --enable-shared         create shared libraries (ok, but not recommended)])
+AC_ARG_ENABLE(shared,     [  --enable-shared         create shared libraries (not currently supported)])
 AC_ARG_ENABLE(standalone, [  --enable-standalone     create a standalone shared library])
 AC_ARG_ENABLE(pthread,    [  --enable-pthread        link with pthreads (usually auto-enabled if needed)])
 AC_ARG_ENABLE(iconv,      [  --enable-iconv          use iconv (usually auto-enabled)])
+AC_ARG_ENABLE(wpo,        [  --enable-wpo            agressively optimize Racket core (enabled by default)])
 AC_ARG_ENABLE(compress,   [  --enable-compress       compress compiled code (enabled by default)])
 AC_ARG_ENABLE(compressboot, [  --enable-compressboot   compress boot files])
 m4_include(../ac/path_arg.m4)
-AC_ARG_ENABLE(racket,     [  --enable-racket=<path>  use <path> as Racket to build; or "auto" to create])
-AC_ARG_ENABLE(scheme,     [  --enable-scheme=<path>  Chez Scheme build directory at <path>])
-AC_ARG_ENABLE(mach,       [  --enable-mach=<mach>    Use Chez Scheme machine type <mach>])
-AC_ARG_ENABLE(target,     [  --enable-target=<mach>  Cross-build for Chez Scheme machine type <mach>])
+AC_ARG_ENABLE(racket,     [  --enable-racket=<path>  use <path> as Racket for build; or "auto" to create])
+AC_ARG_ENABLE(scheme,     [  --enable-scheme=<path>  use <path> as host's build directory for cross])
+AC_ARG_ENABLE(mach,       [  --enable-mach=<mach>    use Chez Scheme machine type <mach>])
+AC_ARG_ENABLE(target,     [  --enable-target=<mach>  cross-build for Chez Scheme machine type <mach>])
 m4_include(../ac/natipkg_arg.m4)
 m4_include(../ac/sdk_arg.m4)
+m4_include(../ac/instlib_arg.m4)
 m4_include(../ac/strip_arg.m4)
 m4_include(../ac/ubsan_arg.m4)
-AC_ARG_ENABLE(csdefault,  [  --enable-csdefault      use CS as default build])
-AC_ARG_ENABLE(csonly,     [  --enable-csonly         build CS only])
-AC_ARG_ENABLE(parent,     [  --enable-parent         Create "../Makefile" (internal use)])
+m4_include(../ac/asan_arg.m4)
+m4_include(../ac/vm_arg.m4)
 m4_include(../ac/crossany_arg.m4)
 AC_ARG_ENABLE(libz,       [  --enable-libz           use installed libz if available])
 AC_ARG_ENABLE(liblz4,     [  --enable-liblz4         use installed liblz4 if available])
@@ -60,6 +61,14 @@ show_explicitly_set()
   fi
 }
 
+if test "${enable_shared}" = "yes" ; then
+  echo "=== Canceling --enable-shared"
+  echo "    Building Racket CS as a shared library is not currently"
+  echo "    supported --- but Racket executables get the benefits of"
+  echo "    sharing, anyway, by going through a shared executable"
+  enable_shared=no
+fi
+
 show_explicitly_enabled "${enable_pthread}" "pthreads"
 show_explicitly_disabled "${enable_pthread}" "pthreads"
 show_explicitly_disabled "${enable_compress}" "Compressed code"
@@ -73,11 +82,9 @@ m4_include(../ac/natipkg_show.m4)
 show_explicitly_enabled "${enable_libz}" "Installed libz"
 show_explicitly_enabled "${enable_liblz4}" "Installed liblz4"
 
-if test "${enable_csonly}" = "yes" ; then
-  enable_csdefault=yes
-fi
-show_explicitly_enabled "${enable_csdefault}" "executables without suffix"
+m4_include(../ac/vm.m4)
 
+m4_include(../ac/instlib.m4)
 m4_include(../ac/sdk_show.m4)
 m4_include(../ac/strip_show.m4)
 
@@ -95,17 +102,18 @@ m4_include(../ac/crossany.m4)
 
 SUB_CONFIGURE_EXTRAS=
 
-
-CS_INSTALLED=cs
 if test "${enable_csdefault}" = "yes" ; then
   CS_INSTALLED=""
+else
+  CS_INSTALLED=cs
+  AC_DEFINE(CS_COMPILED_SUBDIR,1,[Use a subdirectory of "compiled"])
 fi
 
-CS_COMPILED_SUBDIR=1
-COMP_SUBDIR_CONFIGURE_ARGS=
-if test "${enable_csdefault}" = "yes" ; then
-  CS_COMPILED_SUBDIR=0
-  COMP_SUBDIR_CONFIGURE_ARGS=--enable-csdefault
+show_explicitly_disabled "${enable_wpo}" "Agressive core optimization"
+if test "${enable_wpo}" = "no" ; then
+  ENABLE_OR_DISABLE_WPO="WHEN_WPO=no_ UNLESS_WPO="
+else  
+  ENABLE_OR_DISABLE_WPO=""
 fi
 
 ############## Install targets ################
@@ -135,6 +143,7 @@ FRAMEWORK_INSTALL_DIR='$(libpltdir)'
 FRAMEWORK_PREFIX='@executable_path/../lib/'
 
 RACKET='$(DEFAULT_RACKET)'
+BOOTFILE_RACKET='$(RACKET)'
 RUN_RACKET='$(RUN_THIS_RACKET)'
 SETUP_BOOT_MODE=--boot
 
@@ -143,18 +152,29 @@ INSTALL_SETUP_RACKET_FLAGS=
 
 Z_LIB_DEP='$(OWN_Z_LIB)'
 Z_LIB='$(OWN_Z_LIB)'
+Z_LIB_UNPACK='$(AR) x $(OWN_Z_LIB)'
 LZ4_LIB_DEP='$(OWN_LZ4_LIB)'
 LZ4_LIB='$(OWN_LZ4_LIB)'
+LZ4_LIB_UNPACK='$(AR) x $(OWN_LZ4_LIB)'
+
+CS_HOST_WORKAREA_PREFIX=
+
+PLT_CS_SLSP_SUFFIX=
 
 enable_pthread_by_default=yes
+
+cs_auto_flags=--disable-auto-flags
 
 ###### Autoconfigure #######
 
 AC_PROG_CC
 
+m4_include(../ac/is_gcc.m4)
+
 # If using gcc, we want all warnings:
-if test "$CC" = "gcc" ; then 
+if test "$is_gcc" != "" ; then 
   CFLAGS="$CFLAGS -Wall"
+  cs_auto_flags="${cs_auto_flags} --enable-warning-flags"
 fi
 
 AC_CHECK_LIB(m, fmod)
@@ -186,20 +206,26 @@ disable_curses_arg=--disable-curses
 case "$host_os" in
   solaris2*)
     MACH_OS=s2
+    LIBS="$LIBS -lsocket -lnsl -lintl"
+    use_flag_pthread="no"
+    use_flag_posix_pthread="yes"
+    enable_strip=no
     ;;
   aix*)
     ;;
   *freebsd*)
     MACH_OS=fb
     CFLAGS="${CFLAGS} -I/usr/local/include"
-    LIBS="${LIBS} -L/usr/local/lib -liconv -lm -lpthread -lossp-uuid"
+    LDFLAGS="${LDFLAGS} -L/usr/local/lib"
+    LIBS="${LIBS} -liconv -lm -lpthread"
     CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
     ELF_COMP="--expect-elf"
     ;;
   openbsd*)
     MACH_OS=ob
     CFLAGS="${CFLAGS} -I/usr/local/include"
-    LIBS="${LIBS} -L/usr/local/lib -liconv -lm -lpthread -lossp-uuid"
+    LDFLAGS="${LDFLAGS} -L/usr/local/lib"
+    LIBS="${LIBS} -liconv -lm -lpthread"
     LDFLAGS="${LDFLAGS} -Wl,-zwxneeded"
     CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
     ELF_COMP="--expect-elf"
@@ -219,14 +245,9 @@ case "$host_os" in
     ;;
   linux*)
     MACH_OS=le
-    LIBS="${LIBS} -lrt -luuid"
+    LIBS="${LIBS} -lrt"
     CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
     ELF_COMP="--expect-elf"
-    AC_CHECK_HEADER(uuid/uuid.h, ok_uuid=yes, ok_uuid=no)
-    if test "${ok_uuid}" != "yes"; then
-      echo Could not find uuid/uuid.h, needed for Chez Scheme
-      exit 1
-    fi
     ;;
   osf1*)
     ;;
@@ -236,10 +257,15 @@ case "$host_os" in
     skip_iconv_check=yes
     use_flag_pthread=no
     MACH_OS=nt
+    LIBS="${LIBS} -lshell32 -luser32 -lole32 -lrpcrt4 -luuid -lws2_32 -ladvapi32 -lwinmm"
     MINGW=""
     NOT_MINGW="mingw"
     if `which ${host}-windres > /dev/null` ; then
       WINDRES="${host}-windres"
+    fi
+    # ".a" is typically not useful, since we always build a DLL:
+    if test "${enable_libs}" = "" ; then
+      INSTALL_LIBS_ENABLE=no-install
     fi
     ;;
   cygwin*)
@@ -256,6 +282,9 @@ case "$host_os" in
     else
       CONFIGURE_RACKET_SO_COMPILE="env PLT_CS_MAKE_UNIX_STYLE_MACOS=y"
       CPPFLAGS="${CPPFLAGS} -DRACKET_XONX"
+      strip_needs_dash_s=yes
+    fi
+    if test "${enable_embedfw}" = "yes" ; then
       strip_needs_dash_s=yes
     fi
 
@@ -299,12 +328,6 @@ case "$host_os" in
     ;;
 esac
 
-case "$host_cpu" in
-  arm*)
-    enable_pthread_by_default=no
-    ;;
-esac
-
 if test "${enable_pthread}" = "" ; then
   if test "${enable_pthread_by_default}" = "yes" ; then
     enable_pthread=yes
@@ -324,6 +347,9 @@ case "$MACH_HOST_CPU" in
     ;;
   x86|i*86)
     MACH="${thread_prefix}i3${MACH_OS}"
+    ;;
+  aarch64*|arm64*)
+    MACH="${thread_prefix}arm64${MACH_OS}"
     ;;
   arm*)
     MACH="${thread_prefix}arm32${MACH_OS}"
@@ -379,6 +405,9 @@ elif test "${build_os}_${build_cpu}" != "${host_os}_${host_cpu}" ; then
     x86|i*86)
       BUILD_MACH="${BUILD_THREAD_PREFIX}i3${BUILD_OS}"
       ;;
+    aarch64*|arm64*)
+      BUILD_MACH="${BUILD_THREAD_PREFIX}arm64${BUILD_OS}"
+      ;;
     arm*)
       BUILD_MACH="${BUILD_THREAD_PREFIX}arm32${BUILD_OS}"
       ;;
@@ -410,21 +439,35 @@ fi
 
 ############## Racket and Chez Scheme ################
 
-SCHEME_SRC=../../ChezScheme
+case "$srcdir" in
+    /*)
+        upsrcdir=$srcdir
+        ;;
+    *)
+        upsrcdir=../$srcdir
+        ;;
+esac
+
+SCHEME_DIR=${srcdir}/../../ChezScheme
 MAKE_BUILD_SCHEME=checkout
 
 if test "${enable_scheme}" != "" ; then
-  SCHEME_SRC="${enable_scheme}"
-  MAKE_BUILD_SCHEME=none
-else
-  # Check for a directory packaged with a source distribution
-  if test -d "${srcdir}/../../ChezScheme" ; then
-    MAKE_BUILD_SCHEME=copy
-  fi
+  CS_HOST_WORKAREA_PREFIX="${enable_scheme}/"
 fi
 
 if test "${enable_racket}" != "" ; then
-  RACKET="${enable_racket}"
+  if test "${enable_racket}" = "auto" ; then
+    # See also "configure-parent.ac"
+    enable_racket="`pwd`/../../local/cs/c/racketcs"
+    CS_HOST_WORKAREA_PREFIX=../../local/cs/c/
+  fi
+  # In non-cross mode, we interpret `--enable-racket` to supply a
+  # Racket used only for generating Chez Scheme boot files
+  if test "${CROSS_MODE}" = "cross" ; then
+    RACKET="${enable_racket}"
+  else
+    BOOTFILE_RACKET="${enable_racket}"
+  fi
   SETUP_BOOT_MODE=--chain
 fi
 
@@ -449,11 +492,16 @@ m4_include(../ac/strip.m4)
 
 if test "${enable_natipkg}" = "yes" ; then
   CONFIGURE_RACKET_SO_COMPILE="${CONFIGURE_RACKET_SO_COMPILE} env PLT_CS_SLSP_SUFFIX=-natipkg"
+  PLT_CS_SLSP_SUFFIX="-natipkg"
 fi
 
 ############## ubsan ################
 
 m4_include(../ac/ubsan.m4)
+
+############## ubsan ################
+
+m4_include(../ac/asan.m4)
 
 ############## Makefile includes ################
 
@@ -473,44 +521,7 @@ fi
 
 AC_LANG_C
 
-iconv_lib_flag=""
-if test "${skip_iconv_check}" = "no" ; then
- if test "${enable_iconv}" = "yes" ; then
-  AC_CHECK_HEADER(iconv.h, enable_iconv=yes, enable_iconv=no)
-  if test "${enable_iconv}" = "yes" ; then  
-    # Does it all work, now?
-    AC_TRY_RUN(
-[   #include <iconv.h>]
-[   #include <langinfo.h>]
-    int main() {
-[     iconv_open("UTF-8", "UTF-8");]
-      return 0;
-    }, enable_iconv=yes, enable_iconv=no, enable_iconv=yes)
-    if test "${enable_iconv}" = "no" ; then  
-      # Try adding -liconv ?
-      #  We did not use AC_CHECK_LIB because iconv is sometimes macro-renamed
-      ORIG_LIBS="$LIBS"
-      LIBS="$LIBS -liconv"
-      AC_TRY_RUN(
-[     #include <iconv.h>]
-[     #include <langinfo.h>]
-      int main() {
-[     iconv_open("UTF-8", "UTF-8");]
-      return 0;
-      }, enable_iconv=yes, enable_iconv=no, enable_iconv=yes)
-      if test "${enable_iconv}" = "no" ; then
-        LIBS="$ORIG_LIBS"
-      else
-        iconv_lib_flag=" -liconv"      
-      fi
-    fi
-  fi
- fi
- [ msg="iconv is usable" ]
- AC_MSG_CHECKING($msg)
- iconv_usage_result="$enable_iconv$iconv_lib_flag"
- AC_MSG_RESULT($iconv_usage_result)
-fi
+m4_include(../ac/iconv.m4)
 if test "${enable_iconv}" = "no" ; then
   AC_DEFINE(RKTIO_NO_ICONV,1,[Do not use iconv])
 fi
@@ -541,14 +552,14 @@ fi
 ############## zlib and LZ4 ################
 
 if test "${enable_libz}" != "no" ; then
-  if test ! -d "$SCHEME_SRC/zlib" ; then
+  if test ! -d "$SCHEME_DIR/zlib" ; then
     echo "No libz in Scheme directory, so trying installed"
     enable_libz=yes
   fi
 fi
 
 if test "${enable_liblz4}" != "no" ; then
-  if test ! -d "$SCHEME_SRC/lz4" ; then
+  if test ! -d "$SCHEME_DIR/lz4" ; then
     echo "No lz4 in Scheme directory, so trying installed"
     enable_liblz4=yes
   fi
@@ -571,6 +582,7 @@ if test "${enable_libz}" = "yes" ; then
   else
     Z_LIB_DEP=""
     Z_LIB="-lz"
+    Z_LIB_UNPACK='$(NOOP)'
     extra_scheme_config_args="${extra_scheme_config_args} ZLIB=-lz"
   fi
 fi
@@ -592,8 +604,45 @@ if test "${enable_liblz4}" = "yes" ; then
   else
     LZ4_LIB_DEP=""
     LZ4_LIB="-llz4"
+    LZ4_LIB_UNPACK='$(NOOP)'
     extra_scheme_config_args="${extra_scheme_config_args} LZ4=-llz4"
   fi
+fi
+
+############## other inferred machine properties ################
+
+AC_CHECK_SIZEOF([void *])
+
+m4_include(../ac/valid_sizeof.m4)
+
+############## subconfigure ################
+
+# Before libtool setup
+
+CPPFLAGS="$CPPFLAGS $PREFLAGS"
+
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CC="'"'"${CC}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} LDFLAGS="'"'"${LDFLAGS}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} LIBS="'"'"${LIBS}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} AR="'"'"${AR}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} ARFLAGS="'"'"${ARFLAGS}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} RANLIB="'"'"${RANLIB}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} WINDRES="'"'"${WINDRES}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CPPFLAGS="'"'"${CPPFLAGS}"'"'
+
+# Make sure the --enable-pthread result is propagated:
+if test "${enable_pthread}" = "yes" ; then
+  SUB_CONFIGURE_EXTRAS="$SUB_CONFIGURE_EXTRAS --enable-pthread"
+else
+  SUB_CONFIGURE_EXTRAS="$SUB_CONFIGURE_EXTRAS --disable-pthread"
+fi
+
+# Make sure the --enable-iconv result is propagated:
+if test "${enable_iconv}" = "yes" ; then
+  SUB_CONFIGURE_EXTRAS="$SUB_CONFIGURE_EXTRAS --enable-iconv"
+else
+  SUB_CONFIGURE_EXTRAS="$SUB_CONFIGURE_EXTRAS --disable-iconv"
 fi
 
 ############## libtool ################
@@ -610,8 +659,8 @@ if test "${enable_shared}" = "yes" ; then
   abssrcdir=`(cd ${srcdir}; pwd)`
 
   if test "${LIBTOOLPROG}" = "" ; then  
-    (cd ../lt; sh ${abssrcdir}/../lt/configure --enable-shared --disable-static)
-    LIBTOOLPROG=`pwd`/../lt/libtool
+    (cd ../../lt; sh ${abssrcdir}/../../lt/configure --enable-shared --disable-static)
+    LIBTOOLPROG=`pwd`/../../lt/libtool
   fi
 
   if test "${need_gcc_static_libgcc}" = "yes" ; then
@@ -640,6 +689,8 @@ if test "${enable_shared}" = "yes" ; then
   STRIP_LIB_DEBUG=":"
   LIBSFX=la
   ICP_LIB="${LIBTOOLPROG} --mode=install install -s"
+
+  CONFIGURE_RACKET_SO_COMPILE="env PLT_CS_MAKE_LINK_SHARED=y"
 else
   ICP=cp
   LTO="o"
@@ -657,52 +708,14 @@ else
   fi
 fi
 
-############## other inferred machine properties ################
-
-AC_CHECK_SIZEOF([void *])
-
-if test "${ac_cv_sizeof_void_p}" != "4" ; then
-  if test "${ac_cv_sizeof_void_p}" != "8" ; then
-    echo "Something has gone wrong getting the pointer size; see config.log"
-    exit 1
-  fi
-fi
-
 ############## final output ################
 
-# Pass certain configure args on to rktio
-keep_configure_args=
-fixup_prev=
-eval "set x $ac_configure_args"
-shift
-for fixup_arg
-do
-  case $fixup_arg in
-  # Strip away all feature choices
-  -enable* | --enable* | -disable* | --disable*)
-    ;;
-  *)
-    case $fixup_arg in
-    *\'*) fixup_arg=`echo "$fixup_arg" | sed "s/'/'\\\\\\\\''/g"` ;;
-    esac
-    keep_configure_args="$keep_configure_args '$fixup_arg'" ;;
-  esac
-done
+m4_include(../ac/rktio_keep.m4)
 
-CPPFLAGS="$CPPFLAGS $PREFLAGS"
+SCHEME_CONFIG_ARGS="--machine=${MACH} --disable-x11 ${disable_curses_arg} ${cs_auto_flags} ${extra_scheme_config_args}"
+SCHEME_CROSS_CONFIG_ARGS="--machine=${TARGET_MACH} --disable-x11 ${cs_auto_flags} ${disable_curses_arg} ${extra_scheme_config_args}"
 
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CC="'"'"${CC}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} LDFLAGS="'"'"${LDFLAGS}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} AR="'"'"${AR}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} ARFLAGS="'"'"${ARFLAGS}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} RANLIB="'"'"${RANLIB}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} WINDRES="'"'"${WINDRES}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CPPFLAGS="'"'"${CPPFLAGS}"'"'
-
-SCHEME_CONFIG_ARGS="--machine=${MACH} --disable-x11 ${disable_curses_arg} ${extra_scheme_config_args}"
-SCHEME_CROSS_CONFIG_ARGS="--machine=${TARGET_MACH} --disable-x11 ${disable_curses_arg} ${extra_scheme_config_args}"
-
+AC_SUBST(upsrcdir)
 AC_SUBST(CC)
 AC_SUBST(CFLAGS)
 AC_SUBST(CPPFLAGS)
@@ -715,14 +728,18 @@ AC_SUBST(RANLIB)
 AC_SUBST(STATIC_AR)
 AC_SUBST(WINDRES)
 AC_SUBST(ICP)
+AC_SUBST(ICP_LIB)
 AC_SUBST(STRIP_DEBUG)
 AC_SUBST(STRIP_LIB_DEBUG)
+AC_SUBST(STRIP_SIGNATURE)
+AC_SUBST(RESTORE_SIGNATURE)
 AC_SUBST(RKTLINKER)
 AC_SUBST(POST_LINKER)
 AC_SUBST(INCLUDEDEP)
 AC_SUBST(RKTL_PRE)
 AC_SUBST(RKTL_POST)
 AC_SUBST(RACKET)
+AC_SUBST(BOOTFILE_RACKET)
 AC_SUBST(SCHEME_DIR)
 AC_SUBST(MACH)
 AC_SUBST(TARGET_MACH)
@@ -737,13 +754,14 @@ AC_SUBST(MINGW)
 AC_SUBST(NOT_MINGW)
 AC_SUBST(Z_LIB_DEP)
 AC_SUBST(Z_LIB)
+AC_SUBST(Z_LIB_UNPACK)
 AC_SUBST(LZ4_LIB_DEP)
 AC_SUBST(LZ4_LIB)
+AC_SUBST(LZ4_LIB_UNPACK)
 AC_SUBST(CONFIGURE_RACKET_SO_COMPILE)
 AC_SUBST(COMPRESS_COMP)
 AC_SUBST(BOOT_COMPRESS_COMP)
 AC_SUBST(ELF_COMP)
-AC_SUBST(SCHEME_SRC)
 AC_SUBST(MAKE_BUILD_SCHEME)
 AC_SUBST(SCHEME_CONFIG_ARGS)
 AC_SUBST(SCHEME_CROSS_CONFIG_ARGS)
@@ -752,11 +770,15 @@ AC_SUBST(FRAMEWORK_PREFIX)
 AC_SUBST(FRAMEWORK_REL_INSTALL)
 AC_SUBST(CS_INSTALLED)
 AC_SUBST(CS_COMPILED_SUBDIR)
+AC_SUBST(ENABLE_OR_DISABLE_WPO)
 AC_SUBST(COMP_SUBDIR_CONFIGURE_ARGS)
 AC_SUBST(CROSS_COMPILE_TARGET_KIND)
+AC_SUBST(CS_HOST_WORKAREA_PREFIX)
 AC_SUBST(RUN_RACKET)
 AC_SUBST(INSTALL_SETUP_FLAGS)
 AC_SUBST(INSTALL_SETUP_RACKET_FLAGS)
+AC_SUBST(INSTALL_LIBS_ENABLE)
+AC_SUBST(PLT_CS_SLSP_SUFFIX)
 
 makefiles="Makefile"
 

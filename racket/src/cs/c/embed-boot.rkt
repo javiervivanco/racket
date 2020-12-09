@@ -45,18 +45,16 @@
                            (delete-file dest-file))
                          (raise x))])
    (define terminator
-     (if (compress-enabled?)
-         ;; zero byte stops a gzip-read sequence
-         #"\0"
-         ;; #!eof encoding stops(!) a fasl-read sequence
-         #"\26\2\f6"))
+     ;; A 127 byte teriminates a fasl-read sequence
+     #"\177")
    (define data
      (bytes-append bstr1 terminator
                    bstr2 terminator
                    bstr3 terminator))
    (define pos
      (case (or target (path->string (system-library-subpath #f)))
-       [("x86_64-darwin" "i386-darwin" "x86_64-macosx" "i386-macosx")
+       [("x86_64-darwin" "i386-darwin" "aarch64-darwin"
+         "x86_64-macosx" "i386-macosx" "aarch64-macosx")
         ;; Mach-O
         (copy-file use-src-file dest-file #t)
         (add-plt-segment dest-file data #:name #"__RKTBOOT")
@@ -82,16 +80,10 @@
           (add-racket-section use-src-file dest-file #".rackboot"
                               (lambda (pos)
                                 (values data 'any1 'any2))))
-        (define (ensure-executable dest-file)
-          (let* ([perms1 (file-or-directory-permissions dest-file 'bits)]
-                 [perms2 (bitwise-ior user-read-bit user-write-bit user-execute-bit
-                                      perms1)])
-            (unless (equal? perms1 perms2)
-              (file-or-directory-permissions dest-file perms2))))
         (cond
           [start-pos
            ;; Success as ELF
-           (ensure-executable dest-file)
+           (file-or-directory-permissions dest-file (file-or-directory-permissions use-src-file 'bits))
            (cond
              [expect-elf?
               ;; Find ".rackboot" at run time:
@@ -101,7 +93,6 @@
           [else
            ;; Not ELF; just append to the end
            (copy-file use-src-file dest-file #t)
-           (ensure-executable dest-file)
            (define pos (file-size dest-file))
            (call-with-output-file*
             dest-file
@@ -120,11 +111,22 @@
        (error 'embed-boot "cannot file boot-file offset tag"))
 
      (define terminator-len (bytes-length terminator))
-     
+
+     (define big-endian?
+       (if target
+           (case target
+             [("tppc32le") #t]
+             [else #f])
+           (system-big-endian?)))
+
      (file-position o (cdar m))
-     (void (write-bytes (integer->integer-bytes pos 4 #t #f) o))
-     (void (write-bytes (integer->integer-bytes (+ pos (bytes-length bstr1) terminator-len) 4 #t #f) o))
-     (void (write-bytes (integer->integer-bytes (+ pos (bytes-length bstr1) (bytes-length bstr2) (* 2 terminator-len)) 4 #t #f) o)))
+     (void (write-bytes (integer->integer-bytes pos 4 #t big-endian?) o))
+     (let ([pos (+ pos (bytes-length bstr1) terminator-len)])
+       (void (write-bytes (integer->integer-bytes pos 4 #t big-endian?) o))
+       (let ([pos (+ pos (bytes-length bstr2) terminator-len)])
+         (void (write-bytes (integer->integer-bytes pos 4 #t big-endian?) o))
+         (let ([pos (+ pos (bytes-length bstr3) terminator-len)])
+           (void (write-bytes (integer->integer-bytes pos 4 #t big-endian?) o))))))
 
    (cond
     [(null? alt-dests)

@@ -531,11 +531,15 @@ being expanded.
 Binds each identifier in @racket[id-list] within the
 @tech{internal-definition context} represented by @racket[intdef-ctx], where
 @racket[intdef-ctx] is the result of
-@racket[syntax-local-make-definition-context]. Supply @racket[#f] for
+@racket[syntax-local-make-definition-context].
+The @tech{lexical information} of each element of @racket[extra-intdef-ctxs]
+is also added to each identifier in @racket[id-list] before binding.
+
+Supply @racket[#f] for
 @racket[expr] when the identifiers correspond to
 @racket[define-values] bindings, and supply a compile-time expression
-when the identifiers correspond to @racket[define-syntaxes] bindings;
-in the latter case, the number of values produced by the expression should
+when the identifiers correspond to @racket[define-syntaxes] bindings.
+In the latter case, the number of values produced by the expression should
 match the number of identifiers, otherwise the
 @exnraise[exn:fail:contract:arity].
 
@@ -1013,7 +1017,7 @@ macro expansion in the current definition context.
 In a @tech{syntax transformer} that runs in a non-expression context
 and forces the expansion of subforms with @racket[local-expand], use
 @racket[syntax-local-identifier-as-binding] on an identifier from the
-expansion before moving it into a binding position or comparing with
+expansion before moving it into a binding position or comparing it
 with @racket[bound-identifier=?]. Otherwise, the results can be
 inconsistent with the way that @racket[define] works in the same
 definition context.
@@ -1521,7 +1525,7 @@ Returns @racket[#t] if @racket[v] has the
                    [protect? any/c]
                    [orig-stx syntax?])]{
 
-A structure representing a single imported identifier:
+A structure representing a single exported identifier:
 
 @itemize[
 

@@ -806,6 +806,21 @@ RKTIO_EXTERN rktio_bool_t rktio_file_exists(rktio_t *rktio, rktio_const_string_t
 RKTIO_EXTERN rktio_bool_t rktio_directory_exists(rktio_t *rktio, rktio_const_string_t dirname);
 RKTIO_EXTERN rktio_bool_t rktio_link_exists(rktio_t *rktio, rktio_const_string_t filename);
 RKTIO_EXTERN rktio_bool_t rktio_is_regular_file(rktio_t *rktio, rktio_const_string_t filename);
+/* On Windows, check for special filenames (like "aux") before calling
+   the `rktio_file_exists` or `rktio_is_regular_file`. */
+
+#define RKTIO_FILE_TYPE_FILE           1
+#define RKTIO_FILE_TYPE_DIRECTORY      2
+#define RKTIO_FILE_TYPE_LINK           3
+#define RKTIO_FILE_TYPE_DIRECTORY_LINK 4
+
+#define RKTIO_FILE_TYPE_ERROR  (-1)
+
+RKTIO_EXTERN_ERR(RKTIO_FILE_TYPE_ERROR)
+int rktio_file_type(rktio_t *rktio, rktio_const_string_t filename);
+/* Result is `RKTIO_FILE_TYPE_ERROR` for error, otherwise one of
+   the `RKTIO_FILE_TYPE_...` values. On Windows, check for special
+   filenames (like "aux") before calling this function. */
 
 RKTIO_EXTERN rktio_ok_t rktio_delete_file(rktio_t *rktio, rktio_const_string_t fn, rktio_bool_t enable_write_on_fail);
 
@@ -948,7 +963,8 @@ enum {
   RKTIO_PATH_DESK_DIR,
   RKTIO_PATH_DOC_DIR,
   RKTIO_PATH_INIT_DIR,
-  RKTIO_PATH_INIT_FILE
+  RKTIO_PATH_INIT_FILE,
+  RKTIO_PATH_CACHE_DIR
 };
 
 RKTIO_EXTERN char *rktio_expand_user_tilde(rktio_t *rktio, rktio_const_string_t filename);
@@ -1013,14 +1029,21 @@ typedef struct rktio_date_t {
   char *zone_name; /* can be NULL; otherwise, free it */
 } rktio_date_t;
 
-RKTIO_EXTERN_NOERR intptr_t rktio_get_milliseconds(void);
-RKTIO_EXTERN_NOERR double rktio_get_inexact_milliseconds(void);
+RKTIO_EXTERN_NOERR uintptr_t rktio_get_milliseconds(void);
+/* Overflow may cause the result to wrap around to 0, at least on a
+   32-bit platform. */
 
-RKTIO_EXTERN_NOERR intptr_t rktio_get_process_milliseconds(rktio_t *rktio);
-RKTIO_EXTERN_NOERR intptr_t rktio_get_process_children_milliseconds(rktio_t *rktio);
+RKTIO_EXTERN_NOERR double rktio_get_inexact_milliseconds(void);
+/* No overflow, but won't strictly increase if the system clock is reset. */
+
+RKTIO_EXTERN_NOERR uintptr_t rktio_get_process_milliseconds(rktio_t *rktio);
+RKTIO_EXTERN_NOERR uintptr_t rktio_get_process_children_milliseconds(rktio_t *rktio);
+/* Overflow may cause the result to wrap around to 0, at least on a
+   32-bit platform. */
 
 RKTIO_EXTERN_NOERR rktio_timestamp_t rktio_get_seconds(rktio_t *rktio);
 RKTIO_EXTERN rktio_date_t *rktio_seconds_to_date(rktio_t *rktio, rktio_timestamp_t seconds, int nanoseconds, int get_gmt);
+/* A timestamp can be negative to represent a date before 1970. */
 
 /*************************************************/
 /* Windows ShellExecute                          */
@@ -1173,15 +1196,22 @@ RKTIO_EXTERN char *rktio_locale_encoding(rktio_t *rktio);
 /* Returns the name of the current locale's encoding. */
 
 RKTIO_EXTERN void rktio_set_locale(rktio_t *rktio, rktio_const_string_t name);
-/* Sets the current locale, which affects string comparisons and
+/* Sets the current locale, which affects rktio string comparisons and
    conversions. It can also affect the C library's character-property
-   predicates and number printing/parsing. The empty string
-   corresponds to the OS's native locale. */
+   predicates and number printing/parsing by setting a thread-local or
+   process-wide locale, but that effect is not guaranteed. The empty
+   string corresponds to the OS's native locale, and a NULL string
+   pointer corresponds to the C locale. */
 
-RKTIO_EXTERN_NOERR char *rktio_push_c_numeric_locale(rktio_t *rktio);
-RKTIO_EXTERN void rktio_pop_c_numeric_locale(rktio_t *rktio, char *prev);
-/* Use this pair of funtions to temporarily switch the locale to the C
-   locale for number parsing and printing. The result of the first
+RKTIO_EXTERN void rktio_set_default_locale(rktio_const_string_t name);
+/* Similar to rktio_set_locale(), but sets the locale process-wide. */
+
+RKTIO_EXTERN_NOERR void *rktio_push_c_numeric_locale(rktio_t *rktio);
+RKTIO_EXTERN void rktio_pop_c_numeric_locale(rktio_t *rktio, void *prev);
+/* Use this pair of functions to temporarily switch the locale to the
+   C locale for number parsing and printing. Unlike
+   rktio_set_locale(), these functions set and restore the
+   thread-local or even process-wide locale. The result of the first
    function is deallocated when passed to second function. */
 
 RKTIO_EXTERN char *rktio_system_language_country(rktio_t *rktio);

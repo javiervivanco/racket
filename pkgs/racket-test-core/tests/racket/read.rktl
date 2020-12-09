@@ -655,6 +655,26 @@
     (test-write-sym (cadar l) (cadar l) (cadar l))
     (loop (cdr l))]))
 
+(let ()
+  (define BOM-utf8 (bytes #xEF #xBB #xBF))
+  
+  (test "it-works" symbol->string
+        (read (open-input-bytes
+               (bytes-append BOM-utf8 #"it-works"))))
+
+  (test '(1 2 3) read (open-input-bytes
+                       (bytes-append BOM-utf8
+                                     #"(" BOM-utf8 BOM-utf8
+                                     #"1" BOM-utf8
+                                     #"2" BOM-utf8
+                                     #"3" BOM-utf8 BOM-utf8 #")"
+                                     BOM-utf8)))
+
+  (test #t procedure?
+        (parameterize ([read-accept-reader #t])
+          (read-language (open-input-bytes
+                          (bytes-append BOM-utf8 #"#lang racket/base"))))))
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Test mid-stream EOF
 
@@ -1046,7 +1066,7 @@
   (test #\y read-char-or-special p)
   (test 3 file-position p))
 
-;; Reading somethign like a symbol should stop at a special
+;; Reading something like a symbol should stop at a special
 ;; without calling the special-producing procedure:
 (let* ([pos 0]
        [p (make-input-port
@@ -1457,6 +1477,16 @@
 (test "x.rkt::100" srcloc->string (chaperone-struct (make-srcloc "x.rkt" #f #f 100 8)
                                                     srcloc-line (lambda (s v) v)))
 (err/rt-test (srcloc->string 1))
+
+(let ([go (lambda (adjust)
+            (parameterize ([current-directory-for-user (adjust (build-path (car (filesystem-root-list)) "Users" "robby"))])
+              (test
+               "tmp.rkt:1:2"
+               srcloc->string
+               (srcloc (build-path (car (filesystem-root-list)) "Users" "robby" "tmp.rkt")
+                       1 2 3 4))))])
+  (go values)
+  (go path->directory-path))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Make sure that a module load triggered by `#lang` or `#reader` is in

@@ -1,6 +1,6 @@
 
 unixstyle=no
-if test "${enable_useprefix}" = "yes" -a "${prefix}" != "NONE" ; then
+if test "${enable_origtree}" != "yes" -a "${enable_useprefix}" != "no" ; then
   if test "${prefix}" != "NONE" ; then
     unixstyle=yes
   fi
@@ -97,8 +97,6 @@ fi
 GUI_COLLECTS_PATH="${COLLECTS_PATH}"
 GUI_CONFIG_PATH="${CONFIG_PATH}"
 
-CS_BOOTSTRAP_HELP="no-3m"
-
 ########################################
 
 AC_SUBST(collectsdir)
@@ -130,7 +128,6 @@ AC_SUBST(CGC_INSTALLED)
 AC_SUBST(CGC_CAP_INSTALLED)
 AC_SUBST(MAIN_VARIANT)
 AC_SUBST(MAIN_MAKE_TARGET)
-AC_SUBST(CS_BOOTSTRAP_HELP)
 
 AC_SUBST(MAKE_LOCAL_RACKET)
 

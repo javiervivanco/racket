@@ -1539,6 +1539,7 @@
         (when (and (eq? 'macosx (cross-system-type))
                    (not unix-starter?)
                    (get-current-framework-path (mac-dest->executable dest mred?) "Racket"))
+          (remove-signature dest-exe) ;; best to do this before modifying the file in any other way
           (let ([m (or (assq 'framework-root aux)
                        (and relative? '(framework-root . #f)))])
             (if m
@@ -1563,7 +1564,6 @@
                                            dest
                                            mred?))))))
 	(define embed-dlls? (and (eq? 'windows (cross-system-type))
-                                 (eq? 'racket (cross-system-type 'vm))
 				 (let ([m (assq 'embed-dlls? aux)])
 				   (and m (cdr m)))))
 	(define embedded-dlls-box (and embed-dlls? (box null)))
@@ -1902,6 +1902,8 @@
                                    (assq 'subsystem aux))])
                        (when m
                          (set-subsystem dest-exe (cdr m)))))]))))
+          (when (eq? (cross-system-type) 'macosx)
+            (add-ad-hoc-signature dest-exe))
           (done-writable dest-exe old-perms))))))
 
 ;; For Mac OS GRacket, the actual executable is deep inside the

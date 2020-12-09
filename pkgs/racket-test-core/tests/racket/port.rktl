@@ -560,6 +560,35 @@
 (test 3 sync (write-bytes-avail-evt #"Bye" cap-port))
 (test "HELLOBYE" get-output-string orig-port)
 
+;; Make sure output ports get immutable byte strings
+(let ()
+  (define i? #f)
+  (define p (make-output-port
+             'test
+             always-evt
+             (lambda (bstr start end buffer? enable-break?)
+               (set! i? (immutable? bstr))
+               (- end start))
+             void
+             (lambda (v buffer? enable-break?)
+               1)
+             (lambda (bstr start end)
+               (set! i? (immutable? bstr))
+               (wrap-evt always-evt (lambda (v) (- end start))))
+             (lambda (v)
+               (wrap-evt always-evt (lambda (v) 1)))))
+  (test 5 write-bytes (bytes-copy #"hello") p)
+  (test #t values i?)
+  (set! i? #f)
+  (test 5 write-bytes #"hello" p)
+  (test #t values i?)
+  (set! i? #f)
+  (test #t evt? (write-bytes-avail-evt #"hello" p))
+  (test #t values i?)
+  (set! i? #f)
+  (test #t evt? (write-bytes-avail-evt (bytes-copy #"hello") p))
+  (test #t values i?))
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Peeking in a limited pipe extends the limit:
 
@@ -682,6 +711,21 @@
       (test 101 syntax-line stx)
       (test 0 syntax-column stx)
       (test 1026 syntax-position stx))))
+
+;; Test provided by @wcs4217
+(let ([p (open-input-bytes #"\rx\ny")])
+  (port-count-lines! p)
+  (test-values '(1 0 1) (lambda () (port-next-location p)))
+  (test #\return read-char p)
+  (test-values '(2 0 2) (lambda () (port-next-location p)))
+  (test #\x read-char p)
+  (test-values '(2 1 3) (lambda () (port-next-location p)))
+  (test #\newline read-char p)
+  (test-values '(3 0 4) (lambda () (port-next-location p)))
+  (test #\y read-char p)
+  (test-values '(3 1 5) (lambda () (port-next-location p)))
+  (test eof read-char p)
+  (test-values '(3 1 5) (lambda () (port-next-location p))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  Check that if the initial commit thread is killed, then
@@ -924,11 +968,17 @@
   (test #f file-position* p2)
   (err/rt-test (file-position p2) exn:fail:filesystem?))
 
+(let ([i (open-input-bytes #"")])
+  (test i sync/timeout 0 i)
+  (test i sync/timeout #f i)
+  (test #t byte-ready? i)
+  (test #t char-ready? i))
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Text mode, file positions, and buffers
 
 (let ()
-  (define path (build-path (find-system-path 'temp-dir) "test.txt"))
+  (define path (make-temporary-file "test~a.txt"))
 
   (define ofile (open-output-file path #:mode 'text #:exists 'replace))
   (fprintf ofile "abc\ndef\nghi\n")
@@ -1049,6 +1099,44 @@
   (check-srcloc #f 3 29)
   (check-srcloc #f 3 #f)
   (check-srcloc 1 3 29))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Regression test for interaction of `read-line`, "\r\n", and
+;; input buffering
+
+(let ()
+  (define f1 (make-temporary-file "line-feed1~a.txt"))
+  (define f2 (make-temporary-file "line-feed2~a.txt"))
+
+  (define p1 (open-output-file f1 #:exists 'truncate))
+  (define p2 (open-output-file f2 #:exists 'truncate))
+
+  (define (write-prefix p)
+    (for ([i 1364])
+      (write-bytes #"x\r\n" p)))
+
+  (write-prefix p1)
+  (write-prefix p2)
+  (write-bytes #"\r\ny\r\ny\r\n" p1)
+  (write-bytes #"y\r\ny\r\ny\r\n" p2)
+
+  (close-output-port p1)
+  (close-output-port p2)
+
+  (define (count f)
+    (call-with-input-file f
+                          (lambda (in)
+                            (let loop ()
+                              (define v (read-line in 'any))
+                              (if (eof-object? v)
+                                  0
+                                  (add1 (loop)))))))
+
+  (test 1367 count f1)
+  (test 1367 count f2)
+
+  (delete-file f1)
+  (delete-file f2))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

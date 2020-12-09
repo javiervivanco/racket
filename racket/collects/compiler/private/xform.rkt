@@ -1484,7 +1484,7 @@
         ;; top-level converts the top-level tok list e into
         ;; a new top-level tok list, often collecting info
         ;; (such as function prototypes and typedefs).
-        ;; It expects that the tok list e reprsents one "thing",
+        ;; It expects that the tok list e represents one "thing",
         ;; which often means that it's terminated with a semicolon.
         (define (top-level e where can-drop-vars?)
           (cond
@@ -1572,13 +1572,14 @@
             [(typedef? e)
              (when show-info?
                (printf "/* TYPEDEF */\n"))
-             (if (or (simple-unused-def? e)
-                     (unused-struc-typedef? e))
-                 null
-                 (begin
-                   (when pgc?
-                     (check-pointer-type e))
-                   e))]
+	     (let ([e2 (skip-declspec-align e)])
+               (if (or (simple-unused-def? e2)
+                       (unused-struc-typedef? e2))
+                   null
+                   (begin
+                     (when pgc?
+                       (check-pointer-type e2))
+                     e)))]
             [(proc-prototype? e)
              (let ([name (register-proto-information e)])
                (when (eq? (tok-n (car e)) '__xform_nongcing__)
@@ -1596,12 +1597,13 @@
 		       (clean-proto e))
                    null))]
             [(struct-decl? e)
-             (if (braces? (caddr e))
-                 (begin
-                   (when pgc?
-                     (register-struct e))
-                   (when show-info? (printf "/* STRUCT ~a */\n" (tok-n (cadr e)))))
-                 (when show-info? (printf "/* STRUCT DECL */\n")))
+	     (let ([e (skip-declspec-align e)])
+               (if (braces? (caddr e))
+                   (begin
+                     (when pgc?
+                       (register-struct e))
+                     (when show-info? (printf "/* STRUCT ~a */\n" (tok-n (cadr e)))))
+                   (when show-info? (printf "/* STRUCT DECL */\n"))))
              e]
             [(class-decl? e)
              (if (or (braces? (caddr e))
@@ -1762,10 +1764,11 @@
 
         ;; recognize a typedef:
         (define (typedef? e)
-          (or (eq? 'typedef (tok-n (car e)))
-              (and (eq? '__extension__ (tok-n (car e)))
-                   (pair? (cdr e))
-                   (eq? 'typedef (tok-n (cadr e))))))
+	  (let ([e (skip-declspec-align e)])
+            (or (eq? 'typedef (tok-n (car e)))
+		(and (eq? '__extension__ (tok-n (car e)))
+                     (pair? (cdr e))
+                     (eq? 'typedef (tok-n (cadr e)))))))
 
         ;; Sometimes, we know that a declaration is unused because
         ;; the tokenizer saw the defined symbol only once. (This
@@ -1791,12 +1794,13 @@
           (let ([once (lambda (s)
                         (and (not precompiling-header?)
                              (= 1 (hash-ref used-symbols
-                                                  (tok-n s)))))]
+                                            (tok-n s)))))]
                 [seps (list '|,| '* semi)])
             (let ([e (if (eq? '__extension__ (car e))
                          (cdr e)
                          e)])
               (and (eq? (tok-n (cadr e)) 'struct)
+		   (symbol? (tok-n (caddr e)))
                    (brackets? (cadddr e))
                    (once (caddr e))
                    (let loop ([e (cddddr e)])
@@ -1808,10 +1812,24 @@
                         (loop (cdr e))]
                        [else #f]))))))
 
+	(define (skip-declspec-align e)
+	  (if (and (pair? e)
+		   (eq? '__declspec (tok-n (car e)))
+		   (parens? (cadr e))
+		   (let ([l (seq->list (seq-in (cadr e)))])
+		     (and (= 2 (length l))
+			  (eq? 'align (tok-n (car l)))
+			  (parens? (cadr l)))))
+	      ;; Drop __declspec
+	      (cddr e)
+	      ;; Nothing to drop
+	      e))
+
         (define (struct-decl? e)
-          (and (memq (tok-n (car e)) '(struct enum))
-               (ormap braces? (cdr e))
-               (not (function? e))))
+	  (let ([e (skip-declspec-align e)])
+            (and (memq (tok-n (car e)) '(struct enum))
+		 (ormap braces? (cdr e))
+		 (not (function? e)))))
 
         (define (class-decl? e)
           (memq (tok-n (car e)) '(class)))
@@ -2881,7 +2899,7 @@
 
                                     local-vars)
                              (append extra-vars local-vars))])
-                ;; Convert calls and body (recusively)
+                ;; Convert calls and body (recursively)
                 (let-values ([(orig-maxlive) (live-var-info-maxlive live-vars)]
                              [(orig-maxpush) (live-var-info-maxpush live-vars)]
                              [(orig-tag) (live-var-info-tag live-vars)]
@@ -3527,7 +3545,7 @@
                                    (tok-n (car func))))
                       ;; Lift out function calls as arguments. (Can re-order code.
                       ;; Racket source code must live with this change to C's semantics.)
-                      ;; Calls are replaced by varaibles, and setup code generated that
+                      ;; Calls are replaced by variables, and setup code generated that
                       ;; assigns to the variables.
                       (let*-values ([(live-vars)
                                      ;; Check for special form (XXX -> ivar) = call, which will
@@ -3877,6 +3895,14 @@
                                                                 "array access"))
                                                        memcpy?)])
                      (loop (cdr e-) (cons v result) live-vars #t)))]
+                [(eq? '|XFORM_CURRENT_COUNT| (tok-n (car e-)))
+                 (loop (cdr e-)
+                       (cons (make-tok (string->symbol (format "~a_COUNT" (live-var-info-tag live-vars)))
+                                       (tok-line (car e-))
+                                       (tok-file (car e-)))
+                             result)
+                       live-vars
+                       #t)]
                 [(and (assq (tok-n (car e-)) vars)
                       (not (assq (tok-n (car e-)) (live-var-info-vars live-vars))))
                  ;; Add a live variable:
@@ -4054,7 +4080,7 @@
                         (eq? semi (tok-n (list-ref e (sub1 (length e)))))
                         ;; Doesn't start with a star, decrement, increment, or global call
                         (not (memq (tok-n (car e)) '(* -- ++ |::|)))
-                        ;; Not an assignemnt
+                        ;; Not an assignment
                         (not (memq (tok-n (cadr e)) '(= += -=)))
                         ;; Not a return, case, new, or delete
                         (not (memq (tok-n (car e)) '(return case new delete delete_wxobject)))
@@ -4070,6 +4096,13 @@
                       (values (reverse decls) el))))))
 
         (define (get-one e comma-sep?)
+	  (define (get-third result)
+	    (cond
+	     [(null? result) #f]
+	     [(null? (cdr result)) #f]
+	     [(null? (cddr result)) #f]
+	     [(null? (cdddr result)) (tok-n (car result))]
+	     [else (get-third (cdr result))]))
           (let loop ([e e][result null][first #f][second #f])
             (cond
               [(null? e) (values (reverse result) null)]
@@ -4088,7 +4121,7 @@
                          (pragma-file (car e)) (pragma-line (car e)))])]
               [(compiler-pragma? e)
                (unless (null? result)
-                 (error 'pragma "unexpected MSVC compiler pragma"))
+                 (error 'pragma "unexpected MSVC compiler pragma: ~e" e))
                (values (list (car e) (cadr e)) (cddr e))]
               [(eq? semi (tok-n (car e)))
                (values (reverse (cons (car e) result)) (cdr e))]
@@ -4096,6 +4129,8 @@
                (values (reverse (cons (car e) result)) (cdr e))]
               [(and (braces? (car e))
                     (not (memq first '(typedef enum)))
+		    (not (and (eq? first '__declspec)
+			      (memq (get-third result) '(typedef enum))))
                     (or (not (memq first '(static extern const struct union)))
                         (equal? second "C") ; => extern "C" ...
                         (equal? second "C++") ; => extern "C++" ...

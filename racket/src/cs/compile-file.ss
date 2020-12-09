@@ -2,7 +2,7 @@
 ;; Check to make we're using a build of Chez Scheme
 ;; that has all the features we need.
 (define-values (need-maj need-min need-sub need-dev)
-  (values 9 5 3 9))
+  (values 9 5 3 54))
 
 (unless (guard (x [else #f]) (eval 'scheme-fork-version-number))
   (error 'compile-file
@@ -42,7 +42,7 @@
 (define whole-program? #f)
 (generate-inspector-information #f)
 (generate-procedure-source-information #f)
-(compile-compressed #f)
+(fasl-compressed #f)
 (enable-arithmetic-left-associative #t)
 (define build-dir "")
 (define xpatch-path #f)
@@ -56,7 +56,7 @@
            (loop args))]
      [(get-opt args "--srcloc" 0)
       => (lambda (args)
-           (generate-procedure-source-information #f)
+           (generate-procedure-source-information #t)
            (loop args))]
      [(get-opt args "--unsafe" 0)
       => (lambda (args)
@@ -64,7 +64,7 @@
            (loop args))]
      [(get-opt args "--compress" 0)
       => (lambda (args)
-           (compile-compressed #t)
+           (fasl-compressed #t)
            (putenv "PLT_CS_MAKE_COMPRESSED" "y") ; for "linklet.sls"
            (loop args))]
      [(get-opt args "--whole-program" 0)
@@ -78,6 +78,13 @@
      [(get-opt args "--xpatch" 1)
       => (lambda (args)
            (set! xpatch-path (car args))
+           (loop (cdr args)))]
+     [(get-opt args "--show-cp0" 0)
+      => (lambda (args)
+           (run-cp0 (lambda (cp0 x)
+                      (let ([r (cp0 (cp0 x))])
+                        (pretty-print (#%$uncprep r))
+                        r)))
            (loop (cdr args)))]
      [(null? args)
       (error 'compile-file "missing source file")]
@@ -101,41 +108,46 @@
 (when xpatch-path
   (load xpatch-path))
 
-(cond
- [whole-program?
-  (unless (= 1 (length deps))
-    (error 'compile-file "expected a single dependency for whole-program compilation"))
-  (unless (equal? build-dir "")
-    (library-directories (list (cons "." build-dir))))
-  (compile-whole-program (car deps) src #t)]
- [else
-  (for-each load deps)
-  (parameterize ([current-generate-id
-                  (let ([counter-ht (make-eq-hashtable)])
-                    (lambda (sym)
-                      (let* ([n (eq-hashtable-ref counter-ht sym 0)]
-                             [s ((if (gensym? sym) gensym->unique-string symbol->string) sym)]
-                             [g (gensym (symbol->string sym) (format "rkt-~a-~a-~a" src s n))])
-                        (eq-hashtable-set! counter-ht sym (+ n 1))
-                        g)))])
-    (cond
-     [xpatch-path
-      ;; Cross compile: use `compile-to-file` to get a second, host-format output file
-      (let ([sfd (let ([i (open-file-input-port src)])
-                   (make-source-file-descriptor src i #t))])
-        (let ([exprs (call-with-input-file
-                      src
-                      (lambda (i)
-                        (let loop ([pos 0])
-                          (let-values ([(e pos) (get-datum/annotations i sfd pos)])
-                            (if (eof-object? e)
-                                '()
-                                ;; Strip enough of the annotation to expose 'library
-                                ;; or 'top-level-program:
-                                (let ([e (map annotation-expression
-                                              (annotation-expression e))])
-                                  (cons e (loop pos))))))))])
-          (compile-to-file exprs dest)))]
-     [else
-      ;; Normal mode
-      (compile-file src dest)]))])
+(time
+ (cond
+   [whole-program?
+    (unless (= 1 (length deps))
+      (error 'compile-file "expected a single dependency for whole-program compilation"))
+    (printf "Whole-program optimization for Racket core...\n")
+    (printf "[If this step runs out of memory, try configuring with `--disable-wpo`]\n")
+    (unless (equal? build-dir "")
+      (library-directories (list (cons "." build-dir))))
+    (compile-whole-program (car deps) src #t)]
+   [else
+    (for-each load deps)
+    (parameterize ([current-generate-id
+                    (let ([counter-ht (make-eq-hashtable)])
+                      (lambda (sym)
+                        (let* ([n (eq-hashtable-ref counter-ht sym 0)]
+                               [s ((if (gensym? sym) gensym->unique-string symbol->string) sym)]
+                               [g (gensym (symbol->string sym) (format "rkt-~a-~a-~a" src s n))])
+                          (eq-hashtable-set! counter-ht sym (+ n 1))
+                          g)))])
+      (cond
+        [xpatch-path
+         ;; Cross compile: use `compile-to-file` to get a second, host-format output file
+         (let ([sfd (let ([i (open-file-input-port src)])
+                      (make-source-file-descriptor src i #t))])
+           (let ([exprs (call-with-input-file
+                         src
+                         (lambda (i)
+                           (let loop ([pos 0])
+                             (let-values ([(e pos) (get-datum/annotations i sfd pos)])
+                               (if (eof-object? e)
+                                   '()
+                                   ;; Strip enough of the annotation to expose 'library
+                                   ;; or 'top-level-program:
+                                   (let ([e (map annotation-expression
+                                                 (annotation-expression e))])
+                                     (cons e (loop pos))))))))])
+             (compile-to-file exprs dest)))]
+        [else
+         ;; Normal mode
+         (compile-file src dest)]))]))
+
+(printf "    ~a bytes peak memory use\n" (maximum-memory-bytes))

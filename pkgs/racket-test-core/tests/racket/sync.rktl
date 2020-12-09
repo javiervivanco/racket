@@ -545,7 +545,7 @@
   (test 'not-ready values ok?))
 
 ;; If a `nack-guard-evt` function returns a `choice-evt`,
-;; then chosing any of those should avoid a NACK:
+;; then choosing any of those should avoid a NACK:
 (let ([n #f])
   (sync (nack-guard-evt (lambda (nack)
                           (set! n nack)
@@ -688,6 +688,42 @@
                              (wrap-evt always-evt
                                        (lambda (_)
                                          (+ a b))))))
+
+(let ()
+  (define (chain-evts e1 e2)
+    (sync (make-semaphore) (replace-evt e1
+                                        (lambda (v)
+                                          (choice-evt
+                                           e2
+                                           (make-semaphore))))))
+  (test always-evt chain-evts always-evt always-evt)
+  (test always-evt chain-evts (make-semaphore 1) always-evt)
+  (let ([s (make-semaphore 1)])
+    (test always-evt chain-evts s always-evt))
+  (let ([s (make-semaphore 1)])
+    (test s chain-evts (make-semaphore 1) s))
+  (let ([s (make-semaphore 2)])
+    (test s chain-evts s s)
+    (test #f sync/timeout 0 s))
+  (let ([s (make-semaphore)])
+    (thread (lambda () (semaphore-post s)))
+    (test always-evt chain-evts s always-evt))
+  (let ([s (make-semaphore)])
+    (thread (lambda () (semaphore-post s) (sleep) (semaphore-post s)))
+    (test s chain-evts s s)))
+
+;; indirectly check that a `guard-evt` callabck in a `replace-evt`
+;; is not called in atomic mode; if it is, then the thread won't
+;; escape and terminate right
+(test #t thread? (sync
+                  (thread
+                   (lambda ()
+                     (let/cc esc
+                       (sync (replace-evt
+                              (guard-evt
+                               (lambda ()
+                                 (esc 'done)))
+                              void)))))))
 
 ;; ----------------------------------------
 ;; Structures as waitables
@@ -868,7 +904,7 @@
 
 ;; ----------------------------------------
 
-;; In the current implemenation, a depth of 10 for 
+;; In the current implementation, a depth of 10 for 
 ;;  waitable chains is a magic number; it causes the scheduler to
 ;;  swap a thread in to check whether it can run, instead of
 ;;  checking in the thread. (For a well-behaved chain, this 
@@ -1399,7 +1435,7 @@
 	     (procedure-rename (mk-capturing 'act) 'act-capturing))))))
 
 ;; ----------------------------------------
-;; Check wrap-evt result superceded by internally
+;; Check wrap-evt result superseded by internally
 ;;  installed constant (i.e., the input port):
 
 (let ([p (make-input-port

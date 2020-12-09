@@ -2,7 +2,8 @@
 (require "test-util.rkt")
 
 (parameterize ([current-contract-namespace
-                (make-basic-contract-namespace 'racket/contract/parametric)])
+                (make-basic-contract-namespace 'racket/contract/parametric
+                                               'racket/contract/combinator)])
   (define exn:fail:contract:blame? (contract-eval 'exn:fail:contract:blame?))
 
   (test/no-error '(->i ([x integer?]) ([y integer?]) any))
@@ -1789,6 +1790,14 @@
                'pos
                'neg)
      1))
+
+  (test/neg-blame
+   '->i-neg-party-is-being-passed-properly
+   '((contract (-> (->i () any) any)
+               (λ (x) 1)
+               'pos
+               'neg)
+     0))
   
   ;; this used to cause a runtime error in the code that parses ->i
   (test/no-error '(->i ([x () any/c] [y (x) any/c]) any))
@@ -1821,7 +1830,7 @@
    #t)
 
   (test/spec-passed/result
-   'shortcut-error-message
+   'shortcut-error-message-1
    '(with-handlers ([exn:fail?
                      (λ (x) (define m
                               (regexp-match #rx"expected: ([^\n]*)\n"
@@ -1834,7 +1843,29 @@
                   (λ (y) 1)
                   'pos 'neg)
         1))
-   "(and/c number? (>/c 1))")
+   "a number strictly greater than 1")
+
+  (contract-error-test
+   'shortcut-error-message-2
+   '(let ()
+      (define ctc
+        (make-flat-contract
+         #:first-order (λ (x) #f)
+         #:late-neg-projection
+         (λ (b)
+           (λ (x neg-party)
+             (raise-blame-error
+              b x #:missing-party neg-party
+              "an informative error message")))))
+      ((contract (->i ([x any/c])
+                      [_ (x) ctc])
+                 (λ (x) 42)
+                 'pos 'neg)
+       10))
+    (λ (x)
+      (and (exn:fail:contract:blame? x)
+           (regexp-match? #rx"an informative error message"
+                          (exn-message x)))))
 
   (test/spec-passed/result
    'two-underscores
@@ -1858,5 +1889,4 @@
             55 66))
      list)
    '(1 2 3 4))
-      
   )

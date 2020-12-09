@@ -254,7 +254,7 @@ later mappings overwrite earlier mappings.
 
 @defproc[(hash-ref [hash hash?]
                    [key any/c]
-                   [failure-result (failure-result/c any/c)
+                   [failure-result failure-result/c
                                    (lambda ()
                                      (raise (make-exn:fail:contract ....)))])
          any]{
@@ -276,7 +276,7 @@ result:
 
 @defproc[(hash-ref-key [hash hash?]
                        [key any/c]
-                       [failure-result (failure-result/c any/c)
+                       [failure-result failure-result/c
                                        (lambda ()
                                          (raise (make-exn:fail:contract ....)))])
          any]{
@@ -345,7 +345,7 @@ will be determined as described in the documentation to
 
 @history[#:added "7.4.0.3"]}
 
-@defproc[(hash-ref! [hash hash?] [key any/c] [to-set (failure-result/c any/c)])
+@defproc[(hash-ref! [hash hash?] [key any/c] [to-set failure-result/c])
          any]{
 
 Returns the value for @racket[key] in @racket[hash].  If no value is
@@ -368,7 +368,7 @@ Returns @racket[#t] if @racket[hash] contains a value for the given
 @defproc[(hash-update! [hash (and/c hash? (not/c immutable?))]
                        [key any/c]
                        [updater (any/c . -> . any/c)]
-                       [failure-result (failure-result/c any/c)
+                       [failure-result failure-result/c
                                        (lambda ()
                                          (raise (make-exn:fail:contract ....)))])
          void?]{
@@ -385,7 +385,7 @@ concurrent updates.
 @defproc[(hash-update [hash (and/c hash? immutable?)]
                       [key any/c]
                       [updater (any/c . -> . any/c)]
-                      [failure-result (failure-result/c any/c)
+                      [failure-result failure-result/c
                                       (lambda ()
                                         (raise (make-exn:fail:contract ....)))])
           (and/c hash? immutable?)]{
@@ -690,43 +690,6 @@ the result is @racket[(values bad-index-v bad-index-v)] if
 Returns a mutable hash table with the same mappings, same
 key-comparison mode, and same key-holding strength as @racket[hash].}
 
-
-@defproc[(eq-hash-code [v any/c]) fixnum?]{
-
-Returns a @tech{fixnum}; for any two calls with @racket[eq?] values,
-the returned number is the same.
-
-@margin-note{Equal @tech{fixnums} are always @racket[eq?].}}
-
-
-@defproc[(eqv-hash-code [v any/c]) fixnum?]{
-
-Returns a @tech{fixnum}; for any two calls with @racket[eqv?] values,
-the returned number is the same.}
-
-
-@defproc[(equal-hash-code [v any/c]) fixnum?]{
-
-Returns a @tech{fixnum}; for any two calls with @racket[equal?] values,
-the returned number is the same. A hash code is computed even when
-@racket[v] contains a cycle through pairs, vectors, boxes, and/or
-inspectable structure fields. See also @racket[gen:equal+hash].
-
-For any @racket[v] that could be produced by @racket[read], if
-@racket[v2] is produced by @racket[read] for the same input
-characters, the @racket[(equal-hash-code v)] is the same as
-@racket[(equal-hash-code v2)] --- even if @racket[v] and @racket[v2]
-do not exist at the same time (and therefore could not be compared by
-calling @racket[equal?]).
-
-@history[#:changed "6.4.0.12" @elem{Strengthened guarantee for @racket[read]able values.}]}
-
-
-@defproc[(equal-secondary-hash-code [v any/c]) fixnum?]{
-
-Like @racket[equal-hash-code], but computes a secondary value suitable
-for use in double hashing.}
-
 @;------------------------------------------------------------------------
 @section{Additional Hash Table Functions}
 
@@ -794,5 +757,41 @@ h
 ]
 
 }
+
+@defproc[(hash-intersect [h0 (and/c hash? (not/c immutable?))]
+			 [h hash?] ...
+                         [#:combine combine
+                                    (-> any/c any/c any/c)
+                                    (lambda _ (error 'hash-intersect ...))]
+                         [#:combine/key combine/key
+                                     	(-> any/c any/c any/c any/c)
+                                     	(lambda (k a b) (combine a b))])
+	 (and/c hash? immutable?)]{
+
+Constructs the hash table which is the intersection of @racket[h0]
+with every hash table @racket[h].  In the resulting hash table, a key
+@racket[k] is mapped to a combination of the values to which
+@racket[k] is mapped in each of the hash tables.  The final values are
+computed by stepwise combination of the values appearing in each of
+the hash tables by applying @racket[(combine/key k v vi)] or
+@racket[(combine v vi)], where @racket[vi] is the value to which
+@racket[k] is mapped in the i-th hash table @racket[h], and
+@racket[v] is the accumulation of the values from the previous steps.
+The comparison predicate of the first argument (@racket[eq?],
+@racket[eqv?], @racket[equal?]) determines the one for the result.
+
+@examples[
+#:eval the-eval
+(hash-intersect (make-immutable-hash '((a . 1) (b . 2) (c . 3)))
+		(make-immutable-hash '((a . 4) (b . 5)))
+		#:combine +)
+(hash-intersect (make-immutable-hash '((a . 1) (b . 2) (c . 3)))
+		(make-immutable-hash '((a . 4) (b . 5)))
+		#:combine/key
+		(lambda (k v1 v2) (if (eq? k 'a) (+ v1 v2) (- v1 v2))))
+]
+
+
+@history[#:added "7.8.0.11"]}
 
 @(close-eval the-eval)

@@ -24,9 +24,8 @@ installers on some number of client machines, each of which contacts
 the server machine to obtain pre-built packages. The server can act as
 a client, naturally, to create an installer for the server's platform.
 
-GNU @exec{make} is required on the server machine, @exec{nmake} is
-required on Windows client machines, and any @exec{make} should work
-on other client machines.
+GNU @exec{make} is required on the server and non-windows client
+machines, @exec{nmake} is required on Windows client machines.
 
 The distribution-build process is a collaboration between the Racket
 Git repository's top-level makefile and @|distro-build-package|.
@@ -383,7 +382,8 @@ If you (or someone else) previously created an installer site with
 repository creates an installer for the current platform drawing
 packages from the site.
 
-At a minimum, provide @exec{SERVER}, @exec{SERVER_PORT} (usually 80),
+At a minimum, provide @exec{SERVER}, @exec{SERVER_PORT} (usually 80 or 443),
+@exec{SERVER_URL_SCHEME} (if @litchar{https} instead of @litchar{http})
 and @exec{SITE_PATH} (if not empty, include a trailing @litchar{/})
 makefile variables to access a site at
 

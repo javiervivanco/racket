@@ -51,11 +51,13 @@
         (rename bytevector-u8-ref bytes-ref
                 bytevector-u8-set! bytes-set!
                 bytevector-length bytes-length
+                bytevector-copy bytes-copy
                 bitwise-arithmetic-shift arithmetic-shift
                 fixnum->flonum fx->fl 
                 flonum->fixnum fl->fx
                 fxarithmetic-shift-right fxrshift
                 fxarithmetic-shift-left fxlshift
+                fxsll/wraparound fxlshift/wraparound
                 real->flonum ->fl
                 time-utc->date seconds->date)
         (set! rewrites-added? #t)))
@@ -91,10 +93,11 @@
                        [(bytes? v) (values "byte string" (bytes-length v))]
                        [(string? v) (values "string" (string-length v))]
                        [(fxvector? v) (values "fxvector" (fxvector-length v))]
+                       [(flvector? v) (values "flvector" (flvector-length v))]
                        [else (values "value" #f)]))])
         (format-error-values (string-append "index is out of range\n"
                                             "  index: ~s\n"
-                                            "  valid range: [0, " (if len (number->string len) "...") "]\n"
+                                            "  valid range: [0, " (if len (number->string (sub1 len)) "...") "]\n"
                                             "  " what ": ~s")
                              irritants))]
      [else

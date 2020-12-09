@@ -36,14 +36,35 @@
                        (#3%fxsra x max-fx-shift)
                        (#3%fxsra x (#3%fx- n)))
                    (if (#3%fx> n max-fx-shift)
-                       (#3%bitwise-arithmetic-shift x n)
+                       (general-arithmetic-shift x n)
                        (let ([m (#3%fxsll x n)])
                          (if (#3%fx= (#3%fxsra m n) x)
                              m
                              (#3%bitwise-arithmetic-shift x n))))))
-             (#2%bitwise-arithmetic-shift x n)))]
-    [(_ expr ...) #'(#2%bitwise-arithmetic-shift expr ...)]
-    [_ #'#2%bitwise-arithmetic-shift]))
+             (general-arithmetic-shift x n)))]
+    [(_ expr ...) #'(general-arithmetic-shift expr ...)]
+    [_ #'general-arithmetic-shift]))
+
+(define general-arithmetic-shift
+  (|#%name|
+   arithmetic-shift
+   (lambda (x n)
+     (cond
+      [(not (exact-integer? x))
+       (#2%bitwise-arithmetic-shift x n)]
+      [(fixnum? n)
+       (unless (or (eqv? x 0) (fx< n 1000))
+         (guard-large-allocation 'arithmetic-shift 'number n 1))
+       (#2%bitwise-arithmetic-shift x n)]
+      [(and (not (eqv? x 0))
+            (bignum? n)
+            (positive? n))
+       (raise (|#%app|
+               exn:fail:out-of-memory
+               "arithmetic-shift: out of memory"
+               (current-continuation-marks)))]
+      [else
+       (#2%bitwise-arithmetic-shift x n)]))))
 
 (define-syntax-rule (define-bitwise op fxop)
   (...
@@ -87,12 +108,13 @@
   (let ([m (integer-sqrt n)])
     (values m (- n (* m m)))))
 
-(define fx->fl #2%fixnum->flonum)
-(define fxrshift #2%fxarithmetic-shift-right)
-(define fxlshift #2%fxarithmetic-shift-left)
+(define (fx->fl x) (#2%fixnum->flonum x))
+(define (fxrshift x y) (#2%fxarithmetic-shift-right x y))
+(define (fxlshift x y) (#2%fxarithmetic-shift-left x y))
+(define (fxlshift/wraparound x y) (#2%fxsll/wraparound x y))
 
-(define fl->fx #2%flonum->fixnum)
-(define ->fl #2%real->flonum)
+(define (fl->fx x) (#2%flonum->fixnum x))
+(define (->fl x) (#2%real->flonum x))
 (define/who (fl->exact-integer fl)
   (check who flonum? fl)
   (inexact->exact (flfloor fl)))
@@ -372,6 +394,13 @@
       result)]
    [else
     (cond
+     [(and (eq? radix 10)
+           (number? n))
+      ;; `number->string` goes through `format` to get to an implementation
+      ;; like this, so take a shortcut:
+      (let ([op (#%open-output-string)])
+        (#%display n op)
+        (#%get-output-string op))]
      [(eq? radix 16)
       ;; Host generates uppercase letters, Racket generates lowercase
       (string-downcase (#2%number->string n radix))]

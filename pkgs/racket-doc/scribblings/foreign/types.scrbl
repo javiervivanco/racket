@@ -378,7 +378,14 @@ using a parameter-determined conversion.
 Expands to a use of the @racket[default-_string-type] parameter.  The
 parameter's value is consulted when @racket[_string] is evaluated, so
 the parameter should be set before any interface definition that uses
-@racket[_string].}
+@racket[_string].
+
+Don't use @racket[_string] when you should use @racket[_path].
+Although C APIs typically represent paths as strings, and although
+the default @racket[_string] (via @racket[default-_string-type]) even
+implicitly converts Racket paths to strings, using @racket[_path]
+ensures the proper encoding of strings as paths, which is not always
+UTF-8. See also @racket[_path] for a caveat about relative paths.}
 
 @defparam[default-_string-type type ctype?]{
 
@@ -898,7 +905,7 @@ Casts @racket[ptr-or-proc] to a function pointer of type @racket[fun-type].}
 
 A literal used in @racket[_fun] forms. (It's unfortunate that this
 literal has the same name as @racket[->] from
-@racketmodname[racket/contract], but it's a different binding.}}
+@racketmodname[racket/contract], but it's a different binding.)}
 
 @; ----------------------------------------------------------------------
 
@@ -1016,7 +1023,7 @@ Examples:
 
 Creates a C pointer type, where @racket[mode] indicates input or
 output pointers (or both).  The @racket[mode] can be one of the
-following:
+following (matched as a symbol independent of binding):
 
 @itemize[
 
@@ -1058,7 +1065,11 @@ following type:
 
 creates a function that calls the foreign function with a fresh
 integer pointer, and use the value that is placed there as a second
-return value.}
+return value.
+
+@history[#:changed "7.7.0.6" @elem{The modes @racket[i], @racket[o],
+                                   and @racket[io] match as symbols
+                                   instead of free identifiers.}]}
 
 
 @defform[(_box type)]{
@@ -1077,10 +1088,18 @@ Example:
       -> (values res (unbox boxed)))
 ]}
 
-@defform/subs[(_list mode type maybe-len)
+@defform/subs[#:literals (atomic raw atomic nonatomic tagged
+                          atomic-interior interior
+                          stubborn uncollectable eternal)
+              (_list mode type maybe-len maybe-mode)
               ([mode i o io]
                [maybe-len code:blank
-                          len-expr])]{
+                          len-expr]
+               [maybe-mode code:blank
+                           atomic
+                           raw atomic nonatomic tagged
+                           atomic-interior interior
+                           stubborn uncollectable eternal])]{
 
 A @tech{custom function type} that is similar to @racket[_ptr], except
 that it is used for converting lists to/from C vectors.  The optional
@@ -1089,6 +1108,8 @@ the post code, and in the pre code of an output mode to allocate the
 block.  (If the length is 0, then NULL is passed in and an empty list is
 returned.)  In either case, it can refer to a previous binding for the
 length of the list which the C function will most likely require.
+The @racket[maybe-mode], if provided, is quoted and passed to @racket[malloc]
+as needed to allocate the C representation.
 
 For example, the following type corresponds to a function that takes
 a vector argument of type @tt{*float} (from a Racket list input)
@@ -1112,9 +1133,14 @@ return two values, the vector and the boolean.
       [vec : (_list o _float len)]
       -> [res : _bool]
       -> (values vec res))
-]}
+]
 
-@defform[(_vector mode type maybe-len)]{
+@history[#:changed "7.7.0.2" @elem{Added @racket[maybe-mode].}]
+         #:changed "7.7.0.6" @elem{The modes @racket[i], @racket[o],
+                                   and @racket[io] match as symbols
+                                   instead of free identifiers.}]}
+
+@defform[(_vector mode type maybe-len maybe-mode)]{
 
 A @tech{custom function type} like @racket[_list], except that it uses
 Racket vectors instead of lists.
@@ -1131,7 +1157,12 @@ Examples:
       -> (values vec res))
 ]
 
-See @racket[_list] for more explanation about the examples.}
+See @racket[_list] for more explanation about the examples.
+
+@history[#:changed "7.7.0.2" @elem{Added @racket[maybe-mode].}
+         #:changed "7.7.0.6" @elem{The modes @racket[i], @racket[o],
+                                   and @racket[io] match as symbols
+                                   instead of free identifiers.}]}
 
 
 @defform*[#:id _bytes
@@ -1735,7 +1766,7 @@ a-union-val
 ]}
 
 
-@defproc[(union-ptr [u array?]) cpointer?]{
+@defproc[(union-ptr [u union?]) cpointer?]{
 
 Extracts the pointer for a union's storage.
 

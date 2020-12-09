@@ -1,5 +1,6 @@
 #lang racket/base
-(require "../common/memo.rkt"
+(require racket/symbol
+         "../common/memo.rkt"
          "../syntax/syntax.rkt"
          "../syntax/error.rkt"
          "../syntax/scope.rkt"
@@ -32,7 +33,9 @@
          add-bulk-binding!
          add-local-binding!
          
-         binding-lookup)
+         binding-lookup
+
+         existing-binding-key)
 
 ;; ----------------------------------------
 
@@ -174,3 +177,11 @@
     (raise-syntax-error #f
                         "cannot use identifier tainted by macro transformation"
                         id)))
+
+;; ----------------------------------------
+
+(define (existing-binding-key id phase)
+  (define b (resolve+shift id phase #:immediate? #t))
+  (unless (local-binding? b)
+    (raise-syntax-error #f "expected an existing local binding for an already-expanded identifier" id))
+  (local-binding-key b))

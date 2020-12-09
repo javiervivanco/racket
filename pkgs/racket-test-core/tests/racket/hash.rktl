@@ -65,6 +65,20 @@
       hash-union #hash([one . 1] [two . 1]) #hash([three . 3] [four . 4] [two . 1])
       #:combine +)
 
+(test #hash((a . 5) (b . 7))
+      hash-intersect #hash((a . 1) (b . 2) (c . 3)) #hash((a . 4) (b . 5))
+      #:combine +)
+(test #hash((a . 5) (b . -3))
+      hash-intersect #hash((a . 1) (b . 2) (c . 3)) #hash((a . 4) (b . 5))
+      #:combine/key
+      (lambda (k v1 v2) (if (eq? k 'a) (+ v1 v2) (- v1 v2))))
+
+;; Does hash-intersect preserve the kind of the hash?
+(test (hasheq "a" 11)
+      hash-intersect (hasheq "a" 1 (string #\a) 2 (string #\a) 3)
+      (hasheq "a" 10 (string #\a) 20)
+      #:combine +)
+
 (let ()
   (define h (make-hash))
   (hash-union! h #hash([1 . one] [2 . two]))
@@ -321,7 +335,7 @@
 
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Use keys that are a multile of a power of 2 to
+; Use keys that are a multiple of a power of 2 to
 ; get "almost" collisions that force the hash table
 ; to use a deeper tree.
 
@@ -527,6 +541,91 @@
   (test-hash-ref-key/immut (hasheqv) eq? 'foo 'foo))
 
 ;; ----------------------------------------
-;;
+;; Run a GC concurrent to `hash-for-each` or `hash-map`
+;; to make sure a disappearing key doesn't break the
+;; iteration
+
+(define (check-concurrent-gc-of-keys hash-iterate)
+  (define gc-thread
+    (thread
+     (lambda ()
+       (let loop ([n 10])
+         (unless (zero? n)
+           (collect-garbage)
+           (sleep)
+           (loop (sub1 n)))))))
+
+  (let loop ()
+    (unless (thread-dead? gc-thread)
+      (let ([ls (for/list ([i 100])
+                  (gensym))])
+        (define ht (make-weak-hasheq))
+        (for ([e (in-list ls)])
+          (hash-set! ht e 0))
+        ;; `ls` is unreferenced here here on
+        (define counter 0)
+        (hash-iterate
+         ht
+         (lambda (k v)
+           (set! counter (add1 counter))
+           'ok))
+        '(printf "~s @ ~a\n" counter j))
+      (loop))))
+
+(check-concurrent-gc-of-keys hash-for-each)
+(check-concurrent-gc-of-keys hash-map)
+(check-concurrent-gc-of-keys (lambda (ht proc)
+                               (equal? ht (hash-copy ht))))
+(check-concurrent-gc-of-keys (lambda (ht proc)
+                               (equal-hash-code ht)))
+
+;; ----------------------------------------
+;; Make sure a new `equal?`-based key is used when the "new" value is
+;; `eq?` to the old one:
+
+(let ()
+  (define ht (hash))
+  (define f (string-copy "apple"))
+  (define g (string-copy "apple"))
+  (define ht2 (hash-set (hash-set ht f 1) g 1))
+  (test 1 hash-count ht2)
+  (test #t eq? (car (hash-keys ht2)) g))
+
+;; ----------------------------------------
+;; Regression test to make sure all elements are still
+;; reachable by iteration in a copy of a mutable hash table:
+
+(let ([ht (make-hash)])
+  (for ([i 113])
+    (hash-set! ht i 1))
+  
+  (define new-ht (hash-copy ht))
+
+  (test (hash-count ht) hash-count new-ht)
+  (test (for/sum ([k (in-hash-keys ht)])
+          k)
+        'sum
+        (for/sum ([k (in-hash-keys new-ht)])
+          k))
+  (test (hash-count ht)
+        'count
+        (for/sum ([v (in-hash-values new-ht)])
+          v)))
+
+;; ----------------------------------------
+;; Make sure hash-table iteration can call an applicable struct
+
+(let ()
+  (struct proc (f) #:property prop:procedure (struct-field-index f))
+
+  (test '(2) hash-map (hash 'one 1) (proc (lambda (k v) (add1 v))))
+  (test '(2) hash-map (hasheq 'one 1) (proc (lambda (k v) (add1 v))))
+  (test '(2) hash-map (hasheqv 'one 1) (proc (lambda (k v) (add1 v))))
+
+  (test (void) hash-for-each (hash 'one 1) (proc void))
+  (test (void) hash-for-each (hasheq 'one 1) (proc void))
+  (test (void) hash-for-each (hasheqv 'one 1) (proc void)))
+
+;; ----------------------------------------
 
 (report-errs)

@@ -17,8 +17,11 @@
 (define unsafe-char->integer (unsafe-primitive char->integer))
 
 (define unsafe-fx+ (unsafe-primitive fx+))
+(define unsafe-fx+/wraparound (unsafe-primitive fx+/wraparound))
 (define unsafe-fx- (unsafe-primitive fx-))
+(define unsafe-fx-/wraparound (unsafe-primitive fx-/wraparound))
 (define unsafe-fx* (unsafe-primitive fx*))
+(define unsafe-fx*/wraparound (unsafe-primitive fx*/wraparound))
 (define (unsafe-fxquotient n d) (#3%fxquotient n d))
 (define unsafe-fxremainder (unsafe-primitive fxremainder))
 (define unsafe-fxmodulo (unsafe-primitive fxmodulo))
@@ -29,6 +32,7 @@
 (define unsafe-fxnot (unsafe-primitive fxnot))
 (define unsafe-fxrshift (unsafe-primitive fxarithmetic-shift-right))
 (define unsafe-fxlshift (unsafe-primitive fxarithmetic-shift-left))
+(define unsafe-fxlshift/wraparound (unsafe-primitive fxsll/wraparound))
 
 (define unsafe-fx= (unsafe-primitive fx=))
 (define unsafe-fx< (unsafe-primitive fx<))
@@ -59,6 +63,7 @@
 (define unsafe-flfloor (unsafe-primitive flfloor))
 (define unsafe-flceiling (unsafe-primitive flceiling))
 (define unsafe-fltruncate (unsafe-primitive fltruncate))
+(define unsafe-flsingle (unsafe-primitive flsingle))
 
 (define unsafe-flsin (unsafe-primitive flsin))
 (define unsafe-flcos (unsafe-primitive flcos))
@@ -71,7 +76,7 @@
 (define unsafe-flsqrt (unsafe-primitive flsqrt))
 (define unsafe-flexpt (unsafe-primitive flexpt))
 
-(define (unsafe-flrandom gen) (random gen))
+(define (unsafe-flrandom gen) (pseudo-random-generator-next! gen))
 
 (define unsafe-vector*-length (unsafe-primitive vector-length))
 (define unsafe-vector*-ref (unsafe-primitive vector-ref))
@@ -89,6 +94,15 @@
 (define unsafe-bytes-ref (unsafe-primitive bytevector-u8-ref))
 (define unsafe-bytes-set! (unsafe-primitive bytevector-u8-set!))
 
+(define unsafe-bytes-copy!
+  (case-lambda
+    [(dest d-start src)
+     (unsafe-bytes-copy! dest d-start src 0 (bytevector-length src))]
+    [(dest d-start src s-start)
+     (unsafe-bytes-copy! dest d-start src s-start (bytevector-length src))]
+    [(dest d-start src s-start s-end)
+     (bytevector-copy! src s-start dest d-start (fx- s-end s-start))]))
+
 (define unsafe-string-length (unsafe-primitive string-length))
 (define unsafe-string-ref (unsafe-primitive string-ref))
 (define unsafe-string-set! (unsafe-primitive string-set!))
@@ -96,6 +110,10 @@
 (define unsafe-fxvector-length (unsafe-primitive fxvector-length))
 (define unsafe-fxvector-ref (unsafe-primitive fxvector-ref))
 (define unsafe-fxvector-set! (unsafe-primitive fxvector-set!))
+
+(define unsafe-flvector-length (unsafe-primitive flvector-length))
+(define unsafe-flvector-ref (unsafe-primitive flvector-ref))
+(define unsafe-flvector-set! (unsafe-primitive flvector-set!))
 
 (define (unsafe-s16vector-ref s16 k)
   (let* ([cptr (unsafe-struct*-ref s16 0)]
@@ -163,8 +181,48 @@
 (define (unsafe-flimag-part c)
   (#3%imag-part c))
 
-(define unsafe-undefined (let ([p (make-record-type "undefined" '())])
-                           ((record-constructor p))))
+(define-syntax (immutable-constant stx)
+  (syntax-case stx ()
+    [(i-c v)
+     (datum->syntax
+      #'i-c
+      (list 'quote
+            (let ([v (#%syntax->datum #'v)])
+              (cond
+                [(bytevector? v) (bytevector->immutable-bytevector v)]
+                [(string? v) (string->immutable-string v)]
+                [(#%vector? v) (#%vector->immutable-vector v)]))))]))
+
+(define (unsafe-bytes->immutable-bytes! s)
+  (cond
+    [(= (bytes-length s) 0) (immutable-constant #vu8())]
+    [else
+     (#%$bytevector-set-immutable! s)
+     s]))
+(define (unsafe-string->immutable-string! s)
+  (cond
+    [(= (string-length s) 0) (immutable-constant "")]
+    [else
+     (#%$string-set-immutable! s)
+     s]))
+(define (unsafe-vector*->immutable-vector! v)
+  (vector->immutable-vector v)
+  ;; The implementation below is not right, because the vector
+  ;; may contain elements allocated after the vector itself, and
+  ;; wrong-way pointers are not supposed to show up in mutable
+  ;; vectors. Maybe the GC should treat immutable vectors like
+  ;; mutable ones, and then morphing to immutable would be ok.
+  #;
+  (cond
+    [(= (vector-length v) 0)  (immutable-constant #())]
+    [else
+     (#%$vector-set-immutable! v)
+     v]))
+
+;; The black hole object is an immediate in Chez Scheme,
+;; so a use is compact and the optimize can recognize
+;; comparsions to itself:
+(define unsafe-undefined '#0=#0#)
 
 (define (check-not-unsafe-undefined v sym)
   (when (eq? v unsafe-undefined)

@@ -22,11 +22,12 @@
                            with-input-from-file with-output-to-file
                            call-with-output-file
                            file-position
-                           write display newline port-name port-closed? write-char
+                           write newline port-name port-closed? write-char
                            print-graph print-vector-length
                            date? make-date
                            dynamic-wind
                            call-with-current-continuation
+                           call-in-continuation
                            make-engine engine-block engine-return
                            current-eval load
                            sleep thread? buffer-mode?
@@ -45,7 +46,8 @@
                            bitwise-and
                            bitwise-not
                            fllog flatan
-                           fxquotient)
+                           fxquotient
+                           make-flvector flvector-copy)
                    [make-parameter chez:make-parameter]
                    [date-second chez:date-second]
                    [date-minute chez:date-minute]
@@ -66,6 +68,7 @@
                    [fprintf chez:fprintf]
                    [printf chez:printf]
                    [format chez:format]
+                   [display chez:display]
                    [current-error-port chez:current-error-port]
                    [string->number chez:string->number]
                    [number->string chez:number->string]

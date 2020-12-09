@@ -3,6 +3,10 @@
 
 (Section 'macro)
 
+(test #f struct-predicate-procedure? syntax?)
+
+(test #t struct-predicate-procedure? exn:fail:syntax?)
+
 (error-test #'(define-syntaxes () (values 1)) exn:application:arity?)
 (error-test #'(define-syntaxes () (values 1 2)) exn:application:arity?)
 (error-test #'(define-syntaxes (x) (values 1 2)) exn:application:arity?)
@@ -862,7 +866,7 @@
 (require 'm-check-varref-expand)
 
 ;; ----------------------------------------
-;; Check that a modul-level binding with 0 marks
+;; Check that a module-level binding with 0 marks
 ;;  but lexical context is found correctly with
 ;;  1 and 2 marks (test case by Carl):
 
@@ -2133,7 +2137,7 @@
       (require (for-template racket/base))
       (define (disarm s)
         (unless (syntax-tainted? (car (syntax-e (syntax-disarm s #f))))
-          (error "disarm suceeded!"))
+          (error "disarm succeeded!"))
         #''ok)
       (provide disarm)))
 
@@ -2338,7 +2342,7 @@
           (restore))))
 
 ;; ----------------------------------------
-;; Make sure somethign reasonable happens when a `for-syntax` `define`
+;; Make sure something reasonable happens when a `for-syntax` `define`
 ;; is seen via `local-expand` but is not preserved in the expansion
 
 (module module-compiles-but-does-not-visit racket/base
@@ -2447,19 +2451,40 @@
 
 (module rename-transformer-introduction-scope racket/base
   (require (for-syntax racket/base))
-  (provide sym free-id=? original?)
+  (provide sym free-id=? original? sameloc?
+           set-sym set-free-id=? set-original? set-sameloc?)
   (define x #f)
   (define-syntax y (make-rename-transformer #'x))
   (define-syntax (m stx)
-    (define expanded-y (syntax-local-introduce (local-expand #'y 'expression '())))
-    #`(values '#,(syntax-e expanded-y)
-              '#,(free-identifier=? expanded-y #'x)
-              '#,(syntax-original? expanded-y)))
-  (define-values (sym free-id=? original?) (m)))
+    (define orig-y #'y)
+    (define expanded-y (syntax-local-introduce (local-expand orig-y 'expression '())))
+    (define expanded-set-y (syntax-local-introduce (local-expand #`(set! #,orig-y 5) 'expression '())))
+    (define (same-srcloc? a b) (and (equal? (syntax-source a) (syntax-source b))
+                                    (equal? (syntax-line a) (syntax-line b))
+                                    (equal? (syntax-column a) (syntax-column b))))
+    (syntax-case expanded-set-y ()
+      [(_ set!ed-y _)
+       #`(values '#,(syntax-e expanded-y)
+                 '#,(free-identifier=? expanded-y #'x)
+                 '#,(syntax-original? expanded-y)
+                 '#,(same-srcloc? expanded-y orig-y)
+                 '#,(syntax-e #'set!ed-y)
+                 '#,(free-identifier=? #'set!ed-y #'x)
+                 '#,(syntax-original? #'set!ed-y)
+                 '#,(same-srcloc? #'set!ed-y orig-y))]))
+  (define-values (sym free-id=? original? sameloc?
+                      set-sym set-free-id=? set-original? set-sameloc?)
+    (m)))
 
 (test 'x dynamic-require ''rename-transformer-introduction-scope 'sym)
 (test #t dynamic-require ''rename-transformer-introduction-scope 'free-id=?)
 (test #f dynamic-require ''rename-transformer-introduction-scope 'original?)
+(test #t dynamic-require ''rename-transformer-introduction-scope 'sameloc?)
+
+(test 'x dynamic-require ''rename-transformer-introduction-scope 'set-sym)
+(test #t dynamic-require ''rename-transformer-introduction-scope 'set-free-id=?)
+(test #f dynamic-require ''rename-transformer-introduction-scope 'set-original?)
+(test #t dynamic-require ''rename-transformer-introduction-scope 'set-sameloc?)
 
 ;; ----------------------------------------
 ;; Make sure replacing scopes of binding on reference does not
@@ -2491,5 +2516,54 @@
   (test #t values found-it?))
 
 ;; ----------------------------------------
+;; Make sure that `block` forces an expression context with #%expression
+
+(let ()
+  (define-syntax-rule (m x) (set! x 'outer))
+  (define res #f)
+  (let ()
+    (block
+      (m res))
+    (define-syntax-rule (m x) (set! x 'inner))
+    (void))
+  (test 'inner values res))
+
+;; ----------------------------------------
+;; Make sure that `block` works normally in a non-expression context
+(let ()
+  (block
+    ; ensure forward references work
+    (define (f x) (g x))
+    ; ensure definition splices
+    (define-syntax-rule (def-g name)
+      (define (name x) (h x)))
+    ; ensure use-site binder doesn't capture
+    (define-syntax-rule (def-h name arg)
+      (define (name x)
+        (let ([arg 'bad])
+          x)))
+    (def-g g)
+    (def-h h x)
+    (test 'ok values (f 'ok))))
+
+;; ----------------------------------------
+;; Make sure that `local` works normally in a non-expression context
+
+(require racket/local)
+(let ()
+  (local [; ensure forward references work
+          (define (f x) (g x))
+          ; ensure definition splices
+          (define-syntax-rule (def-g name)
+            (define (name x) x))
+          ; ensure use-site binder doesn't capture
+          (define-syntax-rule (def-h name arg)
+            (define (name x)
+              (let ([arg 'bad])
+                x)))
+          (def-g g)
+          (def-h h x)]
+    (test 'ok values (f 'ok))))
+
 
 (report-errs)

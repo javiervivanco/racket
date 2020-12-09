@@ -12,13 +12,16 @@
 
 (define-record struct-type-prop (name guard supers))
 
-;; Record the properties that are implemented by each rtd:
+;; Record the properties that are implemented by each rtd; used
+;; without a lock
 (define rtd-props (make-ephemeron-eq-hashtable))
 
-;; Maps a property-accessor function to `(cons predicate-proc can-impersonate)`:
+;; Maps a property-accessor function to `(cons predicate-proc can-impersonate)`;
+;; used without a lock
 (define property-accessors (make-ephemeron-eq-hashtable))
 
-;; Maps a property-predicate function to `struct-property`:
+;; Maps a property-predicate function to `struct-property`; used without
+;; a lock
 (define property-predicates (make-ephemeron-eq-hashtable))
 
 (define (struct-type-property? v)
@@ -38,26 +41,16 @@
                  (and (procedure? guard)
                       (procedure-arity-includes? guard 2)))
        (raise-argument-error who "(or/c (procedure-arity-includes/c 2) #f 'can-impersonate)" guard))
-     (unless (and (or (null? supers) ; avoid `list?` until it's defined
-                      (list? supers))
-                  (andmap (lambda (p)
-                            (and (pair? p)
-                                 (struct-type-property? (car p))
-                                 (procedure? (cdr p))
-                                 (procedure-arity-includes? (cdr p) 1)))
-                          supers))
+     (unless (and (#%list? supers)
+                  (#%andmap (lambda (p)
+                              (and (pair? p)
+                                   (struct-type-property? (car p))
+                                   (procedure? (cdr p))
+                                   (procedure-arity-includes? (cdr p) 1)))
+                            supers))<
        (raise-argument-error who "(listof (cons/c struct-type-property? (procedure-arity-includes/c 1)))" supers))
      (let* ([can-impersonate? (and (or can-impersonate? (eq? guard 'can-impersonate)) #t)]
             [st (make-struct-type-prop name (and (not (eq? guard 'can-impersonate)) guard) supers)]
-            [pred (escapes-ok
-                    (lambda (v)
-                      (let* ([v (strip-impersonator v)]
-                             [rtd (if (record-type-descriptor? v)
-                                      v
-                                      (and (record? v)
-                                           (record-rtd v)))])
-                        (and rtd
-                             (not (eq? none (struct-property-ref st rtd none)))))))]
             [accessor-name (string->symbol (string-append
                                             (symbol->string name)
                                             "-ref"))]
@@ -65,72 +58,75 @@
                              (string-append
                               (symbol->string name)
                               "?"))]
-            [default-fail
-              (escapes-ok
-                (lambda (v)
-                  (raise-argument-error accessor-name
-                                        (symbol->string predicate-name)
-                                        v)))]
-            [do-fail (lambda (fail v)
-                       (cond
-                        [(eq? fail default-fail) (default-fail v)]
-                        [(procedure? fail) (|#%app| fail)]
-                        [else fail]))])
+            [pred (procedure-rename*
+                      (lambda (v)
+                        (let* ([v (strip-impersonator v)]
+                               [rtd (if (record-type-descriptor? v)
+                                        v
+                                        (and (record? v)
+                                             (record-rtd v)))])
+                          (and rtd
+                               (not (eq? none (struct-property-ref st rtd none))))))
+                      2
+                      predicate-name)])
        (letrec ([acc
-                 (case-lambda
-                  [(v fail)
-                   (cond
-                    [(and (impersonator? v)
-                          (pred v))
-                     (impersonate-struct-or-property-ref acc #f acc v #f #f)]
-                    [else
-                     (let* ([rtd (if (record-type-descriptor? v)
-                                     v
-                                     (and (record? v)
-                                          (record-rtd v)))])
-                       (if rtd
-                           (let ([pv (struct-property-ref st rtd none)])
-                             (if (eq? pv none)
-                                 (do-fail fail v)
-                                 pv))
-                           (do-fail fail v)))])]
-                  [(v) (acc v default-fail)])])
-         (with-global-lock*
-          (hashtable-set! property-accessors
-                          acc
-                          (cons pred can-impersonate?)))
-         (with-global-lock*
-          (hashtable-set! property-predicates
-                          pred
-                          st))
+                 (procedure-rename*
+                  (case-lambda
+                   [(v fail)
+                    (let ([val (let ([v (strip-impersonator v)])
+                                 (if (record-type-descriptor? v)
+                                     (struct-property-ref st v none)
+                                     (if (record? v)
+                                         (struct-property-ref st (record-rtd v) none)
+                                         none)))])
+                      (cond
+                       [(eq? val none)
+                        (cond
+                         [(eq? fail none)
+                          (raise-argument-error accessor-name
+                                                (symbol->string predicate-name)
+                                                v)]
+                         [(procedure? fail) (|#%app| fail)]
+                         [else fail])]
+                       [(impersonator? v)
+                        (impersonate-struct-or-property-ref val #f #|key1:|# acc #|key2:|# #f v #f #f)]
+                       [else val]))]
+                   [(v) (acc v none)])
+                  6
+                  accessor-name)])
+         (add-to-table! property-accessors
+                        acc
+                        (cons pred can-impersonate?))
+         (add-to-table! property-predicates
+                        pred
+                        st)
          (values st
                  pred
                  acc)))]))
 
 (define (struct-type-property-accessor-procedure? v)
-  (and (procedure? v)
-       (let ([v (strip-impersonator v)])
-         (with-global-lock* (hashtable-ref property-accessors v #f)))
-       #t))
+  (let ([v (strip-impersonator v)])
+    (and (#%procedure? v)
+         (eq-hashtable-contains? property-accessors v))))
 
 (define/who struct-type-property-predicate-procedure?
   (case-lambda
    [(v) (struct-type-property-predicate-procedure? v #f)]
    [(v spt)
     (check who struct-type-property? :or-false spt)
-    (and (procedure? v)
-         (let* ([v (strip-impersonator v)]
-                [spt-c (with-global-lock* (hashtable-ref property-predicates v #f))])
-           (cond
-            [(not spt-c) #f]
-            [(not spt) #t]
-            [else (eq? spt spt-c)])))]))
+    (let ([v (strip-impersonator v)])
+      (and (#%procedure? v)
+           (let ([spt-c (eq-hashtable-ref property-predicates v #f)])
+             (cond
+              [(not spt-c) #f]
+              [(not spt) #t]
+              [else (eq? spt spt-c)]))))]))
 
 (define (struct-type-property-accessor-procedure-pred v)
-  (car (with-global-lock (hashtable-ref property-accessors v #f))))
+  (car (eq-hashtable-ref property-accessors v #f)))
 
 (define (struct-type-property-accessor-procedure-can-impersonate? v)
-  (cdr (with-global-lock* (hashtable-ref property-accessors v #f))))
+  (cdr (eq-hashtable-ref property-accessors v #f)))
 
 (define (struct-property-ref prop rtd default)
   (getprop (record-type-uid rtd) prop default))
@@ -138,9 +134,18 @@
 (define (struct-property-set! prop rtd val)
   (putprop (record-type-uid rtd) prop val))
 
+;; Must be consistent with `procedure-rename` in "procedure.ss",
+;; but needed before that one is defined:
+(define (procedure-rename* proc mask name)
+  (make-arity-wrapper-procedure proc
+                                mask
+                                (vector name proc)))
+
 ;; ----------------------------------------
 
-(define-record-type (inspector new-inspector inspector?) (fields parent))
+(define-record-type (inspector new-inspector inspector?)
+  (fields parent)
+  (sealed #t))
 
 (define root-inspector (new-inspector #f))
 
@@ -189,9 +194,9 @@
          :contract "(or/c procedure? exact-nonnegative-integer? #f)"
          proc-spec)
   (check who
-         :test (and (list props)
-                    (andmap (lambda (i) (and (pair? i) (struct-type-property? (car i))))
-                            props))
+         :test (and (#%list? props)
+                    (#%andmap (lambda (i) (and (pair? i) (struct-type-property? (car i))))
+                              props))
          :contract "(listof (cons/c struct-type-property? any/c))"
          props)
   (check who
@@ -201,8 +206,8 @@
          :contract "(or/c inspector? #f 'prefab)"
          insp)
   (check who
-         :test (and (list? immutables)
-                    (andmap exact-nonnegative-integer? immutables))
+         :test (and (#%list? immutables)
+                    (#%andmap exact-nonnegative-integer? immutables))
          :contract "(listof exact-nonnegative-integer?)"
          immutables)
   (check who :or-false procedure? guard)
@@ -351,7 +356,8 @@
       (record-type-hash-procedure rtd (let ([p (caddr guarded-val)])
                                         (if (#%procedure? p)
                                             p
-                                            (lambda (v h) (|#%app| p v h))))))
+                                            (lambda (v h) (|#%app| p v h)))))
+      (struct-property-set! 'secondary-hash rtd (cadddr guarded-val)))
     (struct-property-set! prop rtd guarded-val)
     (values (hash-set ht prop check-val)
             (append
@@ -366,10 +372,13 @@
 
 ;; ----------------------------------------
 
-;; Records which fields of an rtd are mutable, where an rtd that is
+;; Records which fields of an prefab rtd are mutable, where an rtd that is
 ;; not in the table has no mutable fields, and the field list can be
-;; empty if a parent type is mutable:
+;; empty if a parent type is mutable; this table is used without
+;; a lock
 (define rtd-mutables (make-ephemeron-eq-hashtable))
+
+(define struct-proc-tables-need-resize? #f)
 
 ;; Accessors and mutators that need a position are wrapped in these records:
 (define-record position-based-accessor (rtd offset field-count))
@@ -382,70 +391,75 @@
   (let ([rtd (position-based-mutator-rtd f)])
     (string->symbol (string-append (symbol->string (record-type-name rtd)) "-set!"))))
 
-;; Register other procedures in hash tables; avoid wrapping to
-;; avoid making the procedures slower
-(define struct-constructors (make-ephemeron-eq-hashtable))
-(define struct-predicates (make-ephemeron-eq-hashtable))
-(define struct-field-accessors (make-ephemeron-eq-hashtable))
-(define struct-field-mutators (make-ephemeron-eq-hashtable))
+(define (add-to-table! table key val)
+  (if (eq-hashtable-try-atomic-cell table key val)
+      (set! struct-proc-tables-need-resize? #t)
+      (add-to-table! table key val)))
 
-(define (register-struct-constructor! p)
-  (add-to-table! struct-constructors p #t))
+;; Called in the collect-request handler:
+(define (update-struct-procs-table-sizes!)
+  (when struct-proc-tables-need-resize?
+    (set! struct-proc-tables-need-resize? #f)
+    (let ([resize! (lambda (ht)
+                     ;; Since `add-to-table!` uses `eq-hashtable-try-atomic-cell`,
+                     ;; give the tabel a chance to resize
+                     (let ([p (cons #f #f)])
+                       (eq-hashtable-set! ht p #t)
+                       (eq-hashtable-delete! ht p)))])
+      (resize! property-accessors)
+      (resize! property-predicates)
+      (resize! rtd-mutables)
+      (resize! rtd-props))))
 
-(define (register-struct-predicate! p)
-  (add-to-table! struct-predicates p #t))
+(define (|#%struct-constructor| p arity-mask)
+  (make-wrapper-procedure p arity-mask 'constructor))
 
-(define (register-struct-field-accessor! p rtd pos)
-  (add-to-table! struct-field-accessors p (cons rtd pos)))
+(define (|#%struct-predicate| p)
+  (make-wrapper-procedure p 2 'predicate))
 
-(define (register-struct-field-mutator! p rtd pos)
-  (add-to-table! struct-field-mutators p (cons rtd pos)))
+(define (|#%struct-field-accessor| p rtd pos)
+  (make-wrapper-procedure p 2 (cons rtd pos)))
+
+(define (|#%struct-field-mutator| p rtd pos)
+  (make-wrapper-procedure p 4 (cons pos rtd)))
 
 (define (struct-constructor-procedure? v)
-  (and (procedure? v)
-       (let ([v (strip-impersonator v)])
-         (with-global-lock* (hashtable-ref struct-constructors v #f)))))
+  (let ([v (strip-impersonator v)])
+    (and (wrapper-procedure? v)
+         (eq? 'constructor (wrapper-procedure-data v)))))
 
 (define (struct-predicate-procedure? v)
-  (and (procedure? v)
-       (let ([v (strip-impersonator v)])
-         (with-global-lock* (hashtable-ref struct-predicates v #f)))))
+  (let ([v (strip-impersonator v)])
+    (and (wrapper-procedure? v)
+         (eq? 'predicate (wrapper-procedure-data v)))))
 
 (define (struct-accessor-procedure? v)
-  (and (procedure? v)
-       (let ([v (strip-impersonator v)])
-         (or (position-based-accessor? v)
-             (with-global-lock* (hashtable-ref struct-field-accessors v #f))))
-       #t))
+  (let ([v (strip-impersonator v)])
+    (or (position-based-accessor? v)
+        (and (wrapper-procedure? v)
+             (let ([d (wrapper-procedure-data v)])
+               (and (pair? d)
+                    (record-type-descriptor? (car d))))))))
 
 (define (struct-mutator-procedure? v)
-  (and (procedure? v)
-       (let ([v (strip-impersonator v)])
-         (or (position-based-mutator? v)
-             (with-global-lock* (hashtable-ref struct-field-mutators v #f))))
-       #t))
+  (let ([v (strip-impersonator v)])
+    (or (position-based-mutator? v)
+        (and (wrapper-procedure? v)
+             (let ([d (wrapper-procedure-data v)])
+             <  (and (pair? d)
+                    (record-type-descriptor? (cdr d))))))))
 
 (define (struct-accessor-procedure-rtd+pos v)
   (if (position-based-accessor? v)
       (cons (position-based-accessor-rtd v)
             (position-based-accessor-offset v))
-      (with-global-lock* (hashtable-ref struct-field-accessors v #f))))
+      (wrapper-procedure-data v)))
 
-(define (struct-mutator-procedure-rtd+pos v)
+(define (struct-mutator-procedure-pos+rtd v)
   (if (position-based-mutator? v)
-      (cons (position-based-mutator-rtd v)
-            (position-based-mutator-offset v))
-      (with-global-lock* (hashtable-ref struct-field-mutators v #f))))
-
-;; This indirection prevents the whole-program optimizer from inlining
-;; the `with-glocal-lock*` expansion --- which, at the time of
-;; writing, inflates the resulting code by 30%!
-(define add-to-table! #f)
-(define add-to-table!/done
-  (set! add-to-table!
-        (lambda (table key val)
-          (with-global-lock*
-           (hashtable-set! table key val)))))
+      (cons (position-based-mutator-offset v)
+            (position-based-mutator-rtd v))
+      (wrapper-procedure-data v)))
 
 ;; ----------------------------------------
 
@@ -477,10 +491,22 @@
             [parent-fi (if parent-rtd*
                            (struct-type-field-info parent-rtd*)
                            empty-field-info)]
-            [rtd (make-record-type-descriptor name
-                                              parent-rtd*
-                                              prefab-uid #f #f
-                                              (make-fields (+ init-count auto-count)))]
+            [rtd (make-record-type-descriptor* name
+                                               parent-rtd*
+                                               prefab-uid #f #f
+                                               (+ init-count auto-count)
+                                               (let ([mask (sub1 (general-arithmetic-shift 1 (+ init-count auto-count)))])
+                                                 (if (eq? insp 'prefab)
+                                                     mask
+                                                     (let loop ([imms (if (exact-nonnegative-integer? proc-spec)
+                                                                          (cons proc-spec immutables)
+                                                                          immutables)]
+                                                                [mask mask])
+                                                       (cond
+                                                        [(null? imms) mask]
+                                                        [else
+                                                         (let ([m (bitwise-not (arithmetic-shift 1 (car imms)))])
+                                                           (loop (cdr imms) (bitwise-and mask m)))])))))]
             [parent-auto*-count (get-field-info-auto*-count parent-fi)]
             [parent-init*-count (get-field-info-init*-count parent-fi)]
             [parent-total*-count (get-field-info-total*-count parent-fi)]
@@ -516,11 +542,9 @@
                           (and (impersonator? v)
                                (record? (impersonator-val v) rtd))))
                     (string->symbol (string-append (symbol->string name) "?")))])
-         (register-struct-constructor! ctr)
-         (register-struct-predicate! pred)
          (values rtd
-                 ctr
-                 pred
+                 (|#%struct-constructor| ctr (procedure-arity-mask ctr))
+                 (|#%struct-predicate| pred)
                  (make-position-based-accessor rtd parent-total*-count (+ init-count auto-count))
                  (make-position-based-mutator rtd parent-total*-count (+ init-count auto-count)))))]))
 
@@ -550,12 +574,11 @@
         (let* ([parent-rtd* (strip-impersonator parent-rtd)]
                [parent-props
                 (if parent-rtd*
-                    (with-global-lock* (hashtable-ref rtd-props parent-rtd* '()))
+                    (eq-hashtable-ref rtd-props parent-rtd* '())
                     '())]
                [all-immutables (if (integer? proc-spec)
                                    (cons proc-spec immutables)
-                                   immutables)]
-               [mutables (immutables->mutables all-immutables init-count auto-count)])
+                                   immutables)])
           (when (not parent-rtd*)
             (record-type-equal-procedure rtd default-struct-equal?)
             (record-type-hash-procedure rtd default-struct-hash))
@@ -564,9 +587,7 @@
                          (if proc-spec
                              (cons prop:procedure props)
                              props))])
-            (with-global-lock* (hashtable-set! rtd-props rtd props)))
-          (with-global-lock*
-           (register-mutables! mutables rtd parent-rtd*))
+            (add-to-table! rtd-props rtd props))
           ;; Copy parent properties for this type:
           (for-each (lambda (prop)
                       (let loop ([prop prop])
@@ -581,6 +602,14 @@
           (inspector-set! rtd insp)
           ;; Register guard
           (register-guards! rtd parent-rtd guard 'at-start))))]))
+
+;; Field count (init + auto) not including parent fields
+(define (record-type-field-count rtd)
+  (fx- (#%$record-type-field-count rtd)
+       (let ([parent-rtd (record-type-parent rtd)])
+         (if parent-rtd
+             (#%$record-type-field-count parent-rtd)
+             0))))
 
 ;; Used by a `schemify` transformation:
 (define (structure-type-lookup-prefab-uid name parent-rtd* init-count auto-count auto-val immutables)
@@ -610,10 +639,7 @@
 ;; Call with lock:
 (define (prefab-ref prefab-key+count code)
   (and prefabs
-       (let ([e (weak-hash-ref prefabs prefab-key+count #f code equal?)])
-         (and e
-              (not (eq? (car e) #!bwp))
-              (cdr e)))))
+       (hashtable-ref prefabs (cons code prefab-key+count) #f)))
 
 (define (prefab-key+count->rtd prefab-key+count)
   (let ([code (equal-hash-code prefab-key+count)])
@@ -634,36 +660,40 @@
                                  (cdr parent-prefab-key+count)
                                  0))]
              [uid (encode-prefab-key+count-as-symbol prefab-key+count)]
-             [rtd (make-record-type-descriptor name
-                                               parent-rtd
-                                               uid #f #f
-                                               (make-fields total-count))]
-             [mutables (prefab-key-mutables prefab-key)])
+             [rtd (make-record-type-descriptor* name
+                                                parent-rtd
+                                                uid #f #f
+                                                total-count
+                                                ;; All fields must be reported as mutable, because
+                                                ;; we might need to mutate to create cyclic data:
+                                                (sub1 (bitwise-arithmetic-shift-left 1 total-count)))]
+             [mutables (prefab-key-mutables prefab-key total-count)])
         (with-global-lock
          (cond
           [(prefab-ref prefab-key+count code)
            ;; rtd was created concurrently
            => (lambda (rtd) rtd)]
           [else
-           (putprop uid 'prefab-key+count prefab-key+count)
-           (unless prefabs (set! prefabs (make-weak-hash-with-lock #f)))
-           (weak-hash-set! prefabs prefab-key+count (ephemeron-cons prefab-key+count rtd) code equal?)
-           (unless parent-rtd
-             (record-type-equal-procedure rtd default-struct-equal?)
-             (record-type-hash-procedure rtd default-struct-hash))
-           (register-mutables! mutables rtd parent-rtd)
-           (inspector-set! rtd 'prefab)
-           rtd])))])))
+           (let ([pr (cons code prefab-key+count)])
+             (putprop uid 'prefab-key+count prefab-key+count)
+             (putprop uid 'prefab-pr pr) ; retain
+             (unless prefabs (set! prefabs (make-ephemeron-hashtable car equal?)))
+             (hashtable-set! prefabs pr rtd)
+             (unless parent-rtd
+               (record-type-equal-procedure rtd default-struct-equal?)
+               (record-type-hash-procedure rtd default-struct-hash))
+             (register-mutables! mutables rtd parent-rtd)
+             (inspector-set! rtd 'prefab)
+             rtd)])))])))
 
-;; call with lock held
 (define (register-mutables! mutables rtd parent-rtd)
   (unless (and (equal? '#() mutables)
                (or (not parent-rtd)
-                   (not (hashtable-contains? rtd-mutables parent-rtd))))
-    (hashtable-set! rtd-mutables rtd mutables)))
+                   (not (eq-hashtable-contains? rtd-mutables parent-rtd))))
+    (add-to-table! rtd-mutables rtd mutables)))
 
 (define (check-accessor-or-mutator-index who rtd pos)
-  (let* ([total-count (#%vector-length (record-type-field-names rtd))])
+  (let* ([total-count (record-type-field-count rtd)])
     (unless (< pos total-count)
       (if (zero? total-count)
           (raise-arguments-error who
@@ -701,8 +731,7 @@
                                                (if name
                                                    (symbol->string name)
                                                    (string-append "field" (number->string pos))))))])
-        (register-struct-field-accessor! wrap-p rtd pos)
-        wrap-p))]
+        (|#%struct-field-accessor| wrap-p rtd pos)))]
    [(pba pos)
     (make-struct-field-accessor pba pos #f)]))
 
@@ -717,33 +746,35 @@
     (let ([rtd (position-based-mutator-rtd pbm)])
       (check-accessor-or-mutator-index who rtd pos)
       (let* ([abs-pos (+ pos (position-based-mutator-offset pbm))]
-             [p (record-field-mutator rtd abs-pos)]
              [rec-name (record-type-name rtd)]
-             [name (string->symbol
-                    (string-append "set-"
-                                   (symbol->string rec-name)
-                                   "-"
-                                   (if name
-                                       (symbol->string name)
-                                       (string-append "field" (number->string pos)))
-                                   "!"))]
+             [mut-name (string->symbol
+                        (string-append "set-"
+                                       (symbol->string rec-name)
+                                       "-"
+                                       (if name
+                                           (symbol->string name)
+                                           (string-append "field" (number->string pos)))
+                                       "!"))]
              [wrap-p
               (procedure-rename
                (if (struct-type-field-mutable? rtd pos)
+		   (let ([p (record-field-mutator rtd abs-pos)])
+		     (lambda (v a)
+		       (if (record? v rtd)
+			   (p v a)
+			   (impersonate-set! p rtd pos abs-pos v a rec-name name))))
                    (lambda (v a)
-                     (if (record? v rtd)
-                         (p v a)
-                         (impersonate-set! p rtd pos abs-pos v a rec-name (or name 'field))))
-                   (lambda (v a)
-                     (raise-arguments-error name
-                                            "cannot modify value of immutable field in structure"
-                                            "structure" v
-                                            "field index" pos)))
-               name)])
-        (register-struct-field-mutator! wrap-p rtd pos)
-        wrap-p))]
+                     (cannot-modify-by-pos-error mut-name v pos)))
+               mut-name)])
+        (|#%struct-field-mutator| wrap-p rtd pos)))]
    [(pbm pos)
     (make-struct-field-mutator pbm pos #f)]))
+
+(define (cannot-modify-by-pos-error name v pos)
+  (raise-arguments-error name
+                         "cannot modify value of immutable field in structure"
+                         "structure" v
+                         "field index" pos))
 
 ;; Takes constructor arguments and adds auto-argument values.
 ;; Receives and returns `args` is in reverse order.
@@ -814,7 +845,17 @@
                             auto-count
                             (make-position-based-accessor rtd* parent-total*-count (+ init-count auto-count))
                             (make-position-based-mutator rtd* parent-total*-count (+ init-count auto-count))
-                            (mutables->immutables (with-global-lock* (hashtable-ref rtd-mutables rtd* '#())) init-count)
+                            (if (struct-type-prefab? rtd*)
+                                (mutables->immutables (eq-hashtable-ref rtd-mutables rtd* '#()) init-count)
+                                (let ([end (record-type-field-count rtd*)]
+                                      [offset (fx+ 1 (struct-type-parent-total*-count rtd*))]
+                                      [mpm (struct-type-mpm rtd*)])
+                                  (let loop ([i 0])
+                                    (cond
+                                     [(fx= i end) '()]
+                                     [(bitwise-bit-set? mpm (fx+ offset i))
+                                      (loop (fx+ i 1))]
+                                     [else (cons i (loop (fx+ i 1)))]))))
                             next-rtd*
                             skipped?))])
           (cond
@@ -837,24 +878,27 @@
     (check who symbol? :or-false name)
     (let ([rtd* (strip-impersonator rtd)])
       (check-inspector-access who rtd*)
-      (let ([ctr (struct-type-constructor-add-guards
-                  (let* ([c (record-constructor rtd*)]
-                         [fi (struct-type-field-info rtd*)]
-                         [auto-field-adder (get-field-info-auto-adder fi)]
-                         [name (or name
-                                   (string->symbol (format "make-~a" (record-type-name rtd*))))])
-                    (cond
-                     [auto-field-adder
-                      (procedure-rename
-                       (procedure-reduce-arity
-                        (lambda args
-                          (apply c (reverse (auto-field-adder (reverse args)))))
-                        (get-field-info-init*-count fi))
-                       name)]
-                     [else (procedure-rename c name)]))
-                  rtd*
-                  #f)])
-        (register-struct-constructor! ctr)
+      (let ([ctr (let* ([c (record-constructor rtd*)]
+                        [fi (struct-type-field-info rtd*)]
+                        [init*-count (get-field-info-init*-count fi)]
+                        [init*-count-mask (bitwise-arithmetic-shift-left 1 init*-count)]
+                        [auto-field-adder (get-field-info-auto-adder fi)]
+                        [name (or name
+                                  (string->symbol (format "make-~a" (record-type-name rtd*))))])
+                   (|#%struct-constructor|
+                    (struct-type-constructor-add-guards
+                     (cond
+                       [auto-field-adder
+                        (procedure-rename
+                         (procedure-reduce-arity-mask
+                          (lambda args
+                            (apply c (reverse (auto-field-adder (reverse args)))))
+                          init*-count-mask)
+                         name)]
+                       [else (procedure-rename c name)])
+                     rtd*
+                     #f)
+                    init*-count-mask))])
         (cond
          [(struct-type-chaperone? rtd)
           (chaperone-constructor rtd ctr)]
@@ -906,13 +950,12 @@
   (check who struct-type? rtd)
   (let ([rtd* (strip-impersonator rtd)])
     (check-inspector-access who rtd*)
-    (let ([pred (escapes-ok
-                  (lambda (v)
-                    (or (record? v rtd*)
-                        (and (impersonator? v)
-                             (record? (impersonator-val v) rtd*)))))])
-      (register-struct-constructor! pred)
-      pred)))
+    (|#%struct-predicate|
+     (escapes-ok
+      (lambda (v)
+        (or (record? v rtd*)
+            (and (impersonator? v)
+                 (record? (impersonator-val v) rtd*))))))))
 
 ;; ----------------------------------------
 
@@ -926,7 +969,7 @@
 ;; corresponds to `(make-field-info N 0 #f)`.
 (define (struct-type-field-info rtd*)
   (or (getprop (record-type-uid rtd*) 'field-info #f)
-      (let ([n (#%vector-length (record-type-field-names rtd*))]
+      (let ([n (record-type-field-count rtd*)]
             [parent-rtd* (record-type-parent rtd*)])
         ;; If `parent-rtd` is not #f, then we'll get here
         ;; only if were still in the process of setting up
@@ -971,7 +1014,7 @@
       (field-info-auto-adder fi)))
 
 (define (struct-type-total*-field-count rtd*)
-  (get-field-info-total*-count (struct-type-field-info rtd*)))
+  (#%$record-type-field-count rtd*))
 
 (define (struct-type-parent-total*-count rtd*)
   (let ([p-rtd* (record-type-parent rtd*)])
@@ -980,16 +1023,25 @@
         0)))
 
 ;; ----------------------------------------
+(define struct-type-mpm
+  (let ([mpm (csv7:record-field-accessor #!base-rtd 'mpm)])
+    (lambda (rtd) (mpm rtd))))
+
+(define (struct-type-prefab? rtd)
+  (and (getprop (record-type-uid rtd) 'prefab-key+count #f) #t))
 
 (define (struct-type-field-mutable? rtd pos)
-  (let ([mutables (with-global-lock* (hashtable-ref rtd-mutables rtd '#()))])
-    (let loop ([j (#%vector-length mutables)])
-      (cond
-       [(fx= j 0) #f]
-       [else
-        (let ([j (fx1- j)])
-          (or (eqv? pos (#%vector-ref mutables j))
-              (loop j)))]))))
+  (and (record-field-mutable? rtd pos)
+       (if (struct-type-prefab? rtd)
+           (let ([mutables (eq-hashtable-ref rtd-mutables rtd '#())])
+             (let loop ([j (#%vector-length mutables)])
+               (cond
+                [(fx= j 0) #f]
+                [else
+                 (let ([j (fx1- j)])
+                   (or (eqv? pos (#%vector-ref mutables j))
+                       (loop j)))])))
+           #t)))
 
 ;; Returns a list of (cons guard-proc field-count)
 (define (struct-type-guards rtd)
@@ -1027,6 +1079,9 @@
 (define (unsafe-struct? v r)
   (#3%record? v r))
 
+(define (unsafe-struct r . args)
+  (#%apply #%$record r args))
+
 (define (unsafe-struct-ref s i)
   (if (impersonator? s)
       (let loop ([rtd* (record-rtd (impersonator-val s))])
@@ -1060,7 +1115,7 @@
                                                  "        (procedure-arity-includes/c 2)\n"
                                                  "        (procedure-arity-includes/c 2))")
                                       val)
-                               (cons (#%gensym) val))))
+                               (cons (box 'equal+hash) val))))
 
 (define-values (prop:authentic authentic? authentic-ref)
   (make-struct-type-property 'authentic (lambda (val info) #t)))
@@ -1134,65 +1189,58 @@
 (define struct->vector
   (case-lambda
    [(s dots)
-    (if (record? (strip-impersonator s))
-        (let ([rtd (record-rtd (strip-impersonator s))])
-          ;; Create that vector that has '... for opaque ranges and each field
-          ;; value otherwise
-          (let-values ([(vec-len rec-len)
-                        ;; First, get the vector and record sizes
-                        (let loop ([vec-len 1] [rec-len 0] [rtd rtd] [dots-already? #f])
-                          (cond
-                           [(not rtd) (values vec-len rec-len)]
-                           [else
-                            (let ([len (#%vector-length (record-type-field-names rtd))])
-                              (cond
-                               [(struct-type-immediate-transparent? rtd)
-                                ;; A transparent region
-                                (loop (+ vec-len len) (+ rec-len len) (record-type-parent rtd) #f)]
-                               [dots-already?
-                                ;; An opaque region that follows an opaque region
-                                (loop vec-len (+ rec-len len) (record-type-parent rtd) #t)]
-                               [else
-                                ;; The start of opaque regions
-                                (loop (add1 vec-len) (+ rec-len len) (record-type-parent rtd) #t)]))]))])
-            ;; Walk though the record's types again, this time filling in the vector
-            (let ([vec (#%make-vector vec-len dots)])
-              (vector-set! vec 0 (string->symbol (format "struct:~a" (record-type-name rtd))))
-              (let loop ([vec-pos vec-len] [rec-pos rec-len] [rtd rtd] [dots-already? #f])
-                (when rtd
-                  (let* ([len (#%vector-length (record-type-field-names rtd))]
-                         [rec-pos (- rec-pos len)])
-                    (cond
-                     [(struct-type-immediate-transparent? rtd)
-                      ;; Copy over a transparent region
-                      (let ([vec-pos (- vec-pos len)])
-                        (let floop ([n 0])
-                          (cond
-                           [(= n len) (loop vec-pos rec-pos (record-type-parent rtd) #f)]
-                           [else
-                            (vector-set! vec (+ vec-pos n) (unsafe-struct-ref s (+ rec-pos n)))
-                            (floop (add1 n))])))]
-                     [dots-already?
-                      ;; Skip another opaque region
-                      (loop vec-pos rec-pos (record-type-parent rtd) #t)]
-                     [else
-                      ;; The vector already has `dots`
-                      (loop (sub1 vec-pos) rec-pos (record-type-parent rtd) #t)]))))
-              vec)))
-        ;; Any value that is not implemented as a record is treated as
-        ;; a fully opaque struct
-        (vector (string->symbol (format "struct:~a" ((inspect/object s) 'type))) dots))]
+    (let ([s* (strip-impersonator s)])
+      (if (record? s*)
+          (let ([rtd (record-rtd s*)])
+            ;; Create that vector that has '... for opaque ranges and each field
+            ;; value otherwise
+            (let-values ([(vec-len rec-len)
+                          ;; First, get the vector and record sizes
+                          (let loop ([vec-len 1] [rec-len 0] [rtd rtd] [dots-already? #f])
+                            (cond
+                             [(not rtd) (values vec-len rec-len)]
+                             [else
+                              (let ([len (record-type-field-count rtd)])
+                                (cond
+                                 [(struct-type-immediate-transparent? rtd)
+                                  ;; A transparent region
+                                  (loop (fx+ vec-len len) (fx+ rec-len len) (record-type-parent rtd) #f)]
+                                 [dots-already?
+                                  ;; An opaque region that follows an opaque region
+                                  (loop vec-len (fx+ rec-len len) (record-type-parent rtd) #t)]
+                                 [else
+                                  ;; The start of opaque regions
+                                  (loop (fx+ 1 vec-len) (fx+ rec-len len) (record-type-parent rtd) #t)]))]))])
+              ;; Walk though the record's types again, this time filling in the vector
+              (let ([vec (#%make-vector vec-len dots)])
+                (#%vector-set! vec 0 (string->symbol (string-append-immutable
+                                                      "struct:"
+                                                      (#%symbol->string (record-type-name rtd)))))
+                (let loop ([vec-pos vec-len] [rec-pos rec-len] [rtd rtd] [dots-already? #f])
+                  (when rtd
+                    (let* ([len (record-type-field-count rtd)]
+                           [rec-pos (fx- rec-pos len)])
+                      (cond
+                       [(struct-type-immediate-transparent? rtd)
+                        ;; Copy over a transparent region
+                        (let ([vec-pos (fx- vec-pos len)])
+                          (let floop ([n 0])
+                            (cond
+                             [(fx= n len) (loop vec-pos rec-pos (record-type-parent rtd) #f)]
+                             [else
+                              (#%vector-set! vec (fx+ vec-pos n) (unsafe-struct-ref s (fx+ rec-pos n)))
+                              (floop (fx+ 1 n))])))]
+                       [dots-already?
+                        ;; Skip another opaque region
+                        (loop vec-pos rec-pos (record-type-parent rtd) #t)]
+                       [else
+                        ;; The vector already has `dots`
+                        (loop (sub1 vec-pos) rec-pos (record-type-parent rtd) #t)]))))
+                vec)))
+          ;; Any value that is not implemented as a record is treated as
+          ;; a fully opaque struct
+          (vector (string->symbol (format "struct:~a" ((inspect/object s*) 'type))) dots)))]
    [(s) (struct->vector s '...)]))
-
-;; ----------------------------------------
-
-(define (make-fields field-count)
-  (list->vector
-   (let loop ([i 0])
-     (if (= i field-count)
-         '()
-         (cons `(mutable ,(string->symbol (format "f~a" i)))
-               (loop (fx1+ i)))))))
 
 ;; ----------------------------------------
 ;; Convenience for Rumble implementation:
@@ -1221,6 +1269,7 @@
                                             (cond
                                              [(null? fields) (reverse accum)]
                                              [else (loop (cdr fields) (cons pos accum) (add1 pos))]))]
+                       [field-count (length #'(field ...))]
                        [struct:parent (if (syntax->datum #'parent)
                                           (make-id #'parent "struct:~a" (syntax->datum #'parent))
                                           #f)])
@@ -1230,25 +1279,27 @@
                                          #'mk))]
                          [uid (datum->syntax #'name ((current-generate-id) (syntax->datum #'name)))])
              #'(begin
-                 (define struct:name (make-record-type-descriptor 'name struct:parent 'uid #f #f '#((immutable field) ...)))
+                 (define struct:name (make-record-type-descriptor* 'name  struct:parent 'uid #f #f field-count 0))
                  (define unsafe-make-name (record-constructor (make-record-constructor-descriptor struct:name #f #f)))
                  (define name ctr-expr)
                  (define authentic-name? (record-predicate struct:name))
-                 (define name? (lambda (v) (or (authentic-name? v)
-                                               (and (impersonator? v)
-                                                    (authentic-name? (impersonator-val v))))))
+                 (define name? (|#%struct-predicate|
+                                (lambda (v) (or (authentic-name? v)
+                                                (and (impersonator? v)
+                                                     (authentic-name? (impersonator-val v)))))))
                  (define name-field
                    (let ([name-field (record-accessor struct:name field-index)])
-                     (lambda (v)
-                       (if (authentic-name? v)
-                           (name-field v)
-                           (pariah (impersonate-ref name-field struct:name field-index v 'name 'field))))))
+                     (|#%struct-field-accessor|
+                      (lambda (v)
+                        (if (authentic-name? v)
+                            (name-field v)
+                            (pariah (impersonate-ref name-field struct:name field-index v 'name 'field))))
+                      struct:name
+                      field-index)))
                  ...
                  (define dummy
                    (begin
                      (register-struct-named! struct:name)
-                     (register-struct-constructor! name)
-                     (register-struct-field-accessor! name-field struct:name field-index) ...
                      (record-type-equal-procedure struct:name default-struct-equal?)
                      (record-type-hash-procedure struct:name default-struct-hash)
                      (inspector-set! struct:name #f)))))))])))
@@ -1265,4 +1316,4 @@
              (define make-name name)))])))
 
 (define (register-struct-named! rtd)
-  (with-global-lock* (hashtable-set! rtd-props rtd '())))
+  (add-to-table! rtd-props rtd '()))

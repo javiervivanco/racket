@@ -55,8 +55,6 @@ rktio_connect_stop
 rktio_poll_connect_ready
 rktio_connect_trying
 rktio_socket_shutdown
-rktio_udp_get_ttl
-rktio_udp_set_ttl
 rktio_udp_open
 rktio_udp_disconnect
 rktio_udp_bind
@@ -66,6 +64,8 @@ rktio_udp_sendto_in
 rktio_udp_recvfrom
 rktio_udp_recvfrom_in
 rktio_udp_set_receive_buffer_size
+rktio_udp_set_ttl
+rktio_udp_get_ttl
 rktio_udp_get_multicast_loopback
 rktio_udp_set_multicast_loopback
 rktio_udp_get_multicast_ttl
@@ -130,6 +130,7 @@ rktio_file_exists
 rktio_directory_exists
 rktio_link_exists
 rktio_is_regular_file
+rktio_file_type
 rktio_delete_file
 rktio_rename_file
 rktio_get_current_directory
@@ -186,6 +187,7 @@ rktio_locale_strcoll
 rktio_strcoll_utf16
 rktio_locale_encoding
 rktio_set_locale
+rktio_set_default_locale
 rktio_push_c_numeric_locale
 rktio_pop_c_numeric_locale
 rktio_system_language_country

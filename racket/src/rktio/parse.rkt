@@ -7,7 +7,7 @@
          (prefix-in : parser-tools/lex-sre)
          parser-tools/yacc)
 
-;; Parse "rktio.h" to produce a seqeuence
+;; Parse "rktio.h" to produce a sequence
 ;;  (define-constant <id> <const>) ...
 ;;  <type-def> ...
 ;;  <func-def> ...
@@ -298,13 +298,13 @@
     [`(,def ,err-val ,flags ,ret ,name ,args)
      `(,def ,err-val ,flags ,(update-type ret) ,name
         ,(map (lambda (a) (update-bind a #:as-argument? #t)) args))]
-    [else e]))
+    [_ e]))
 
 (define (update-type-types e)
   (match e
     [`(define-struct-type ,name ,fields)
      `(define-struct-type ,name ,(map update-bind fields))]
-    [else e]))
+    [_ e]))
 
 (define content
   (append

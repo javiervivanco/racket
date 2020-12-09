@@ -191,6 +191,7 @@
       (when clean?
         (delete-directory/files pkg-dir)))
     (define (show-dependencies deps update? auto?)
+      (define unique-deps (remove-duplicates deps))
       (unless quiet?
         (printf/flush "The following~a packages are listed as dependencies of ~a~a:~a\n"
                       (if update? " out-of-date" " uninstalled")
@@ -201,8 +202,8 @@
                                   (if update? "updated" "installed"))
                           "")
                       (if update?
-                          (format-deps deps)
-                          (format-list deps)))))
+                          (format-deps unique-deps)
+                          (format-list unique-deps)))))
     (define simultaneous-installs
       (for/hash ([i (in-list infos)])
         (values (install-info-name i) (install-info-directory i))))
@@ -527,7 +528,7 @@
                                                                (valid-version? inst-vers*))))
                                                 (begin
                                                   (log-pkg-error
-                                                   "bad verson specification for ~a: ~e"
+                                                   "bad version specification for ~a: ~e"
                                                    name
                                                    inst-vers*)
                                                   "0.0")
@@ -1240,7 +1241,7 @@
                       null]
                      [else
                       ;; Flush cache of downloaded checksums, in case
-                      ;; there was a race between our checkig and updates on
+                      ;; there was a race between our checking and updates on
                       ;; the catalog server:
                       (clear-checksums-in-cache! update-cache)
                       (list (pkg-desc orig-pkg-source orig-pkg-type pkg-name #f auto?

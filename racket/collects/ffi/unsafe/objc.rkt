@@ -37,7 +37,7 @@
                           (lambda (v) (not (eq? v 0)))))
 
 (define _Method (_cpointer/null 'Method))
-(define _IMP (_fun #:async-apply (lambda (f) (f)) _id _SEL -> _id))
+(define _IMP (_fun #:atomic? #t #:async-apply (lambda (f) (f)) _id _SEL -> _id))
 
 (define-cstruct _objc_super ([receiver _id][class _Class]))
 
@@ -283,7 +283,8 @@
        ;; But if we assume no unaligned data and that fancy types
        ;; like _m256 won't show up with ObjC, it seems to be as
        ;; simple as this:
-       ((ctype-sizeof v) . <= . 16))]))
+       ((ctype-sizeof v) . <= . 16))]
+    [(aarch64-macosx aarch64-darwin) (lambda (v) #t)]))
 
 ;; Make `msgSends' access atomic, so that a thread cannot be suspended
 ;; or killed during access, which would block other threads.

@@ -60,7 +60,7 @@
     (define-ftype uintptr_t uptr)
     (define-ftype rktio_int64_t integer-64)
     (define-ftype function-pointer uptr)
-    (define _uintptr _uint64)
+    (define _uintptr (if (> (fixnum-width) 32) _uint64 _uint32))
     (define NULL 0)
 
     (define (<< a b) (bitwise-arithmetic-shift-left a b))
@@ -219,16 +219,32 @@
          (ftype-ref rktio_convert_result_t (in_consumed) p)
          (ftype-ref rktio_convert_result_t (out_produced) p)
          (ftype-ref rktio_convert_result_t (converted) p))))
-      (define (cast v from to)
-        (let ([p (malloc from)])
-          (ptr-set! p from v)
-          (ptr-ref p to)))
 
+    (define (copy-bytes x i)
+      (let ([bstr (make-bytevector i)])
+        (let loop ([j 0])
+          (unless (fx= j i)
+            (bytes-set! bstr j (foreign-ref 'unsigned-8 x j))
+            (loop (fx+ j 1))))
+        bstr))
+
+    (define (copy-terminated-bytes x)
+      (let loop ([i 0])
+        (if (fx= 0 (foreign-ref 'unsigned-8 x i))
+            (copy-bytes x i)
+            (loop (fx+ i 1)))))
+
+    (define (copy-terminated-shorts x)
+      (let loop ([i 0])
+        (if (fx= 0 (foreign-ref 'unsigned-16 x i))
+            (copy-bytes x i)
+            (loop (fx+ i 2)))))
+      
     (define (rktio_to_bytes fs)
-      (cast (ptr->address fs) _uintptr _bytes))
+      (copy-terminated-bytes (ptr->address fs)))
 
     (define (rktio_to_shorts fs)
-      (cast (ptr->address fs) _uintptr _short_bytes))
+      (copy-terminated-shorts (ptr->address fs)))
 
     ;; Unlike `rktio_to_bytes`, frees the array and strings
     (define rktio_to_bytes_list
@@ -244,7 +260,7 @@
              (let ([bs (foreign-ref 'uptr (ptr->address lls) (* i (foreign-sizeof 'uptr)))])
                (if (not (eqv? NULL bs))
                    (cons (begin0
-                          (cast bs _uintptr _bytes)
+                          (copy-terminated-bytes bs)
                           (rktio_free (make-ptr bs)))
                          (loop (add1 i)))
                    '()))]))
@@ -440,6 +456,52 @@
 
   ;; ----------------------------------------
 
+  ;; For glib logging, we need a function pointer that works across
+  ;; places and logs to the main place's root logger. Although it's
+  ;; kind of a hack, it's much simpler to implement that here and
+  ;; export the function pointer as a primitive.
+  
+  (export glib-log-message
+          ;; Make sure the callable is retained:
+          glib-log-message-callable)
+
+  (define G_LOG_LEVEL_ERROR    2)
+  (define G_LOG_LEVEL_CRITICAL 3)
+  (define G_LOG_LEVEL_WARNING  4)
+  (define G_LOG_LEVEL_MESSAGE  5)
+  (define G_LOG_LEVEL_INFO     6)
+  (define G_LOG_LEVEL_DEBUG    7)
+  
+  (define-values (glib-log-message glib-log-message-callable)
+    (let ([glib-log-message
+           (lambda (domain glib-level message)
+             (let ([level (cond
+                           [(fxbit-set? glib-level G_LOG_LEVEL_ERROR) 'fatal]
+                           [(fxbit-set? glib-level G_LOG_LEVEL_CRITICAL) 'error]
+                           [(fxbit-set? glib-level G_LOG_LEVEL_WARNING) 'warning]
+                           [(fxbit-set? glib-level G_LOG_LEVEL_MESSAGE) 'warning]
+                           [(fxbit-set? glib-level G_LOG_LEVEL_INFO) 'info]
+                           [else 'debug])])
+               (let ([go (lambda ()
+                           (unsafe-start-atomic)
+                           (disable-interrupts)
+                           (let ([message (if domain
+                                              (string-append domain ": " message)
+                                              message)])
+                             (log-message* (unsafe-root-logger) level #f message #f #f #f))
+                           (enable-interrupts)
+                           (unsafe-end-atomic))])
+                 (cond
+                  [(eqv? 0 (get-thread-id)) (go)]
+                  [else
+                   (post-as-asynchronous-callback go)]))))])
+      (let ([callable (foreign-callable __collect_safe glib-log-message (string int string) void)])
+        (values
+         (foreign-callable-entry-point callable)
+         callable))))
+  
+  ;; ----------------------------------------
+
   (export system-library-subpath)
   (define system-library-subpath
     (case-lambda
@@ -480,6 +542,5 @@
   (set-make-async-callback-poll-wakeup! unsafe-make-signal-received)
   (set-get-machine-info! get-machine-info)
   (set-processor-count! (1/processor-count))
-  (set-convert-source-file-descriptor-path! 1/string->path)
   (install-future-logging-procs! logging-future-events? log-future-event)
   (install-place-logging-procs! logging-place-events? log-place-event))

@@ -25,7 +25,9 @@ code where the @racket[require] of @racketmodname[racket/fixnum] is
 replaced with
 
 @racketblock[(require (filtered-in
-                       (λ (name) (regexp-replace #rx"unsafe-" name ""))
+                       (λ (name)
+                         (and (regexp-match #rx"^unsafe-fx" name)
+                              (regexp-replace #rx"unsafe-" name "")))
                        racket/unsafe/ops))]
 
 to drop in unsafe versions of the library. Alternately, when
@@ -66,14 +68,40 @@ result would not be a fixnum.
 @defproc[(fxrshift [a fixnum?] [b fixnum?]) fixnum?]
 )]{
 
-Safe versions of @racket[unsafe-fxand], @racket[unsafe-fxior],
-@racket[unsafe-fxxor], @racket[unsafe-fxnot],
-@racket[unsafe-fxlshift], and @racket[unsafe-fxrshift].  The
+Like @racket[bitwise-and], @racket[bitwise-ior],
+@racket[bitwise-xor], @racket[bitwise-not], and
+@racket[arithmetic-shift], but constrained to consume @tech{fixnums};
+the result is always a @tech{fixnum}. The @racket[unsafe-fxlshift] and
+@racket[unsafe-fxrshift] operations correspond to
+@racket[arithmetic-shift], but require non-negative arguments;
+@racket[unsafe-fxlshift] is a positive (i.e., left) shift, and
+@racket[unsafe-fxrshift] is a negative (i.e., right) shift, where the
+number of bits to shift must be no more than the number of bits used to
+represent a @tech{fixnum}. The
 @exnraise[exn:fail:contract:non-fixnum-result] if the arithmetic
 result would not be a fixnum.
 
 @history[#:changed "7.0.0.13" @elem{Allow any number of arguments for @racket[fxand], @racket[fxior],
                                     and @racket[fxxor].}]}
+
+
+@deftogether[(
+@defproc[(fx+/wraparound [a fixnum?] [b fixnum?]) fixnum?]
+@defproc[(fx-/wraparound [a fixnum?] [b fixnum?]) fixnum?]
+@defproc[(fx*/wraparound [a fixnum?] [b fixnum?]) fixnum?]
+@defproc[(fxlshift/wraparound [a fixnum?] [b fixnum?]) fixnum?]
+)]{
+
+Like @racket[fx+], @racket[fx-], @racket[fx*], and @racket[fxlshift],
+but a fixnum result is produced for any allowed arguments (i.e., for
+any fixnum argument, except that the second
+@racket[fxlshift/wraparound] argument must be between 0 and the number
+of bits in a fixnum, inclusive). The result is produced by simply discarding bits
+that do not fit in a fixnum representation. The result is negative if
+the highest of the retained bits is set---even, for example, if the
+value was produced by adding two positive fixnums.
+
+@history[#:added "7.9.0.6"]}
 
 
 @deftogether[(
@@ -86,18 +114,29 @@ result would not be a fixnum.
 @defproc[(fxmax [a fixnum?] [b fixnum?] ...) fixnum?]
 )]{
 
-Safe versions of @racket[unsafe-fx=], @racket[unsafe-fx<],
- @racket[unsafe-fx>], @racket[unsafe-fx<=], @racket[unsafe-fx>=],
- @racket[unsafe-fxmin], and @racket[unsafe-fxmax].
+Like @racket[=], @racket[<], @racket[>],
+@racket[<=], @racket[>=], @racket[min], and @racket[max], but
+constrained to consume @tech{fixnums}.
 
 @history/arity[]}
 
 @deftogether[(
 @defproc[(fx->fl [a fixnum?]) flonum?]
-@defproc[(fl->fx [a flonum?]) fixnum?]
+@defproc[(fl->fx [fl flonum?]) fixnum?]
 )]{
 
-Safe versions of @racket[unsafe-fx->fl] and @racket[unsafe-fl->fx].}
+Conversion between @tech{fixnums} and @tech{flonums} with truncation
+in the case of converting a @tech{flonum} to a @tech{fixnum}.
+
+The @racket[fx->fl] function is the same as @racket[exact->inexact] or
+@racket[->fl] constrained to a fixnum argument.
+
+The @racket[fl->fx] function is the same as @racket[truncate] followed
+by @racket[inexact->exact] or @racket[fl->exact-integer] constrained
+to returning a fixnum. If the truncated flonum does not fit into a
+fixnum, the @exnraise[exn:fail:contract].
+
+@history[#:changed "7.7.0.8" @elem{Changed @racket[fl->fx] to truncate.}]}
 
 
 @defproc[(fixnum-for-every-system? [v any/c]) boolean?]{

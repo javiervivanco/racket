@@ -148,7 +148,7 @@ flags:
    cache is cleared. Unless @DFlag{no-docs} or @Flag{D} is also
    specified, the documentation-index database is reset.}
 
- @item{@DFlag{fast-clean} or @Flag{c} --- like @DFlag{clean}, but
+ @item{@DFlag{fast-clean} --- like @DFlag{clean}, but
    without forcing a bootstrap of @exec{raco setup} from source (which
    means that @DFlag{fast-clean} cannot clean corruption that affects
    @exec{raco setup} itself).}
@@ -166,6 +166,10 @@ flags:
   is up-to-date, needs only a timestamp adjustment, or can be
   recompiled from an existing @filepath{.zo} in machine-independent
   format (when compiling to a machine-dependent format).}
+
+ @item{@DFlag{sync-docs-only} --- synchronize or move documentation
+   into place to ``build'' it, but do not run or render documentation
+   sources.}
 
  @item{@DFlag{no-launcher} or @Flag{x} --- refrain from creating
    executables or installing @tt{man} pages (as specified in
@@ -350,6 +354,32 @@ as @exec{raco make}. Specifically, if @envvar{PLT_COMPILED_FILE_CHECK}
 is set to @litchar{exists}, then @exec{raco make} does not attempt to
 update a compiled file's timestamp if the file is not recompiled.
 
+Some additional environment variables are useful for performance
+debugging:
+
+@itemlist[
+
+ @item{@indexed-envvar{PLT_SETUP_DMS_ARGS} triggers a call to
+       @racket[dump-memory-stats] after each collection is compiled,
+       where the environment variable's value is parsed with
+       @racket[read] to obtain a list of arguments to
+       @racket[dump-memory-stats].}
+
+ @item{@indexed-envvar{PLT_SETUP_LIMIT_CACHE} (set to anything) avoids
+       caching compiled-file information across different collections,
+       which is useful to reduce noise when looking for memory leaks.}
+
+ @item{@indexed-envvar{PLT_SETUP_NO_FORCE_GC} (set to anything)
+       suppresses a call to @racket[collect-garbage] that is issued by
+       default for non-parallel builds after each collection is
+       compiled and after each document is run or rendered.}
+
+ @item{@indexed-envvar{PLT_SETUP_SHOW_TIMESTAMPS} (set to anything)
+       appends the current process time after @litchar[" @ "] for each
+       status message printed by @exec{raco setup}.}
+
+]
+
 @history[#:changed "6.1" @elem{Added the @DFlag{pkgs},
                                @DFlag{check-pkg-deps}, and
                                @DFlag{fail-fast} flags.}
@@ -358,7 +388,10 @@ update a compiled file's timestamp if the file is not recompiled.
          #:changed "6.6.0.3" @elem{Added support for @envvar{PLT_COMPILED_FILE_CHECK}.}
          #:changed "7.0.0.19" @elem{Added @DFlag{places} and  @DFlag{processes}.}
          #:changed "7.2.0.7" @elem{Added @DFlag{error-in} and  @DFlag{error-out}.}
-         #:changed "7.2.0.8" @elem{Added @DFlag{recompile-only}.}]
+         #:changed "7.2.0.8" @elem{Added @DFlag{recompile-only}.}
+         #:changed "7.9.0.3" @elem{Added @envvar{PLT_SETUP_NO_FORCE_GC},
+                                   @envvar{PLT_SETUP_SHOW_TIMESTAMPS},
+                                   and @DFlag{sync-docs-only}.}]
 
 @; ------------------------------------------------------------------------
 
@@ -2157,11 +2190,10 @@ Returns @racket[#t] if cross-installation mode has been detected,
 @defproc[(load-collections-xref [on-load (-> any/c) (lambda () (void))])
          xref?]{
 
-Like @racket[load-xref], but automatically find all cross-reference files for
-manuals that have been installed with @exec{raco setup}.
-
-A cached copy of cross-reference information can be used, in which
-case @racket[on-load] is @emph{not} called.}
+Either creates and caches or returns a cached cross-reference record
+created with @racket[make-collections-xref]. The @racket[on-load]
+function is called only when a previously cached record is not
+returned.}
 
 
 @defproc[(make-collections-xref [#:no-user? no-user? any/c #f]
@@ -2171,7 +2203,9 @@ case @racket[on-load] is @emph{not} called.}
                                 [#:register-shutdown! register-shutdown! ((-> any) . -> . any) void])
          xref?]{
 
-Like @racket[load-collections-xref], but takes advantage of a
+Like @racket[load-xref], but automatically finds all cross-reference
+files for manuals that have been installed with @exec{raco setup}.
+The resulting cross-reference record takes advantage of a
 cross-reference database @racket[db-path], when support is available,
 to delay the loading of cross-reference details until needed.
 

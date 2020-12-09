@@ -1,10 +1,11 @@
 #lang racket/base
 (require racket/fixnum
+         racket/symbol
          "wrap.rkt")
 
 (provide infer-procedure-name)
 
-(define (infer-procedure-name orig-s new-s)
+(define (infer-procedure-name orig-s new-s explicit-unnamed?)
   (define inferred-name (wrap-property orig-s 'inferred-name))
   (cond
     [(symbol? inferred-name)
@@ -29,11 +30,17 @@
      (define (add-property str)
        (wrap-property-set (reannotate orig-s new-s)
                           'inferred-name
-                          ;; Hack: starting with "[" means
-                          ;; "derived from path". This distinction
-                          ;; is used when printing function names
-                          ;; in a stack trace.
-                          (string->symbol (string-append-immutable "[" str))))
+                          ;; Starting with "[" means "derived from
+                          ;; path". This distinction is used when
+                          ;; printing function names in a stack trace.
+                          ;; Furthermore, "!" or "^" after "[" indicates
+                          ;; methodness or not, so add an explicit "^"
+                          ;; if necessary.
+                          (let ([prefix (if (or (char=? (string-ref str 0) #\!)
+                                                (char=? (string-ref str 0) #\^))
+                                            "[^"
+                                            "[")])
+                            (string->symbol (string-append-immutable prefix str)))))
      (cond
        [(and (or (path? src) (string? src)) line col)
         (add-property
@@ -47,13 +54,15 @@
          (string-append (source->string src)
                         "::"
                         (number->string pos)))]
-       [else ; includes `(void? inferred-name)`
-        ;; We can't provide a source name, but explicity
+       [(or explicit-unnamed?
+            (void? inferred-name))
+        ;; We can't provide a source name, but explicitly
         ;; suppress any other inferred name:
         (wrap-property-set (reannotate orig-s new-s)
                            'inferred-name
-                           ;; Hack: "[" means "no name"
-                           '|[|)])]))
+                           ;; "[" means "no name"
+                           '|[|)]
+       [else new-s])]))
 
 (define (source->string src)
   (define str (if (string? src) src (path->string src)))

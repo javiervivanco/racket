@@ -129,16 +129,47 @@
 (fprintf (current-output-port) "*~v*" '!!!)
 (newline)
 
+(parameterize ([error-print-width 5])
+  (test "abc" (format "~.a" "abc"))
+  (test "abcde" (format "~.a" "abcde"))
+  (test "ab..." (format "~.a" "abcdef"))
+  (test "abc" (format "~.a" #"abc"))
+  (test "abcde" (format "~.a" #"abcde"))
+  (test "ab..." (format "~.a" #"abcdef"))
+  (test "ab..." (format "~.a" 'abcdef))
+  (test "\"ab\"" (format "~.s" "ab"))
+  (test "\"abc\"" (format "~.s" "abc"))
+  (test "\"a..." (format "~.s" "abcde"))
+  (test "#\"a\"" (format "~.s" #"a"))
+  (test "#\"ab\"" (format "~.s" #"ab"))
+  (test "#\"..." (format "~.s" #"abc"))
+  (test "#\"..." (format "~.s" #"abcdef"))
+  (test "|a b|" (format "~.s" '|a b|))
+  (test "|a..." (format "~.s" '|a bx|))
+  (test "(1 2)" (format "~.a" '(1 2)))
+  (test "(1..." (format "~.a" '(10 2))))
+
 (test "no: hi 10"
       (with-handlers ([exn:fail? exn-message])
         (error 'no "hi ~s" 10)))
 
-(test "error: format string requires 1 arguments, given 3"
+(test "error: format string requires 1 arguments, given 3; arguments were: 1 2 3"
       (with-handlers ([exn:fail? exn-message])
         (error 'no "hi ~s" 1 2 3)))
-(test "error: format string requires 2 arguments, given 1"
+(test "error: format string requires 2 arguments, given 1; arguments were: 8"
       (with-handlers ([exn:fail? exn-message])
         (error 'no "hi ~s ~s" 8)))
+(test "error: format string requires 2 arguments, given 100"
+      (with-handlers ([exn:fail? exn-message])
+        (apply error 'no "hi ~s ~s" (for/list ([i 100]) i))))
+(test "error: format string requires 2 arguments, given 51"
+      (with-handlers ([exn:fail? exn-message])
+        (apply error 'no "hi ~s ~s" (for/list ([i 51]) i))))
+(test (apply string-append
+             "error: format string requires 2 arguments, given 50; arguments were:"
+             (for/list ([i 50]) (string-append " " (number->string i))))
+      (with-handlers ([exn:fail? exn-message])
+        (apply error 'no "hi ~s ~s" (for/list ([i 50]) i))))
 
 (define infinite-ones 
   (make-input-port 'ones
@@ -797,7 +828,7 @@
  (let loop ([j 10])
    (unless (zero? j)
      (let ()
-       (define p (open-input-file "compiled/io.rktl"))
+       (define p (open-input-file "../cs/schemified/io.scm"))
        (port-count-lines! p)
        (let loop ()
          (define s (read-string 100 p))
@@ -814,7 +845,7 @@
  (let loop ([j 10])
    (unless (zero? j)
      (let ()
-       (define p (host:open-input-file "compiled/io.rktl"))
+       (define p (host:open-input-file "../cs/schemified/io.scm"))
        (host:file-stream-buffer-mode p read-byte-buffer-mode)
        (when count-lines? (host:port-count-lines! p))
        (let loop ()
@@ -828,7 +859,7 @@
  (let loop ([j 10])
    (unless (zero? j)
      (let ()
-       (define p (open-input-file "compiled/io.rktl"))
+       (define p (open-input-file "../cs/schemified/io.scm"))
        (file-stream-buffer-mode p read-byte-buffer-mode)
        (when count-lines? (port-count-lines! p))
        (let loop ()
@@ -842,7 +873,7 @@
  (let loop ([j 10])
    (unless (zero? j)
      (let ()
-       (define p (host:open-input-file "compiled/io.rktl"))
+       (define p (host:open-input-file "../cs/schemified/io.scm"))
        (let loop ()
          (unless (eof-object? (host:read-line p))
            (loop)))
@@ -854,7 +885,7 @@
  (let loop ([j 10])
    (unless (zero? j)
      (let ()
-       (define p (open-input-file "compiled/io.rktl"))
+       (define p (open-input-file "../cs/schemified/io.scm"))
        (let loop ()
          (unless (eof-object? (read-line p))
            (loop)))

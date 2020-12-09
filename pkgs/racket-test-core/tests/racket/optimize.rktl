@@ -3213,13 +3213,10 @@
      (displayln (list expr 3 '!))
   )
   (map check-omit-ok
-       '((unsafe-vector-ref x y)
-         (unsafe-vector*-ref x y)
-         (unsafe-struct-ref x y)
+       '((unsafe-vector*-ref x y)
          (unsafe-struct*-ref x y)
          (unsafe-mcar x)
          (unsafe-mcdr x)
-         (unsafe-unbox y)
          (unsafe-unbox* x)
          (unsafe-bytes-ref x y)
          (unsafe-string-ref x y)
@@ -3229,12 +3226,15 @@
          (unsafe-s16vector-ref x y)
          (unsafe-u16vector-ref x y)))
   (map (lambda (x) (check-omit-ok x #f))
-       '((unsafe-vector-set! x y z)
+       '((unsafe-vector-ref x y)
+         (unsafe-struct-ref x y)
+         (unsafe-vector-set! x y z)
          (unsafe-vector*-set! x y z)
          (unsafe-struct-set! x y z)
          (unsafe-struct*-set! x y z)
          (unsafe-set-mcar! x y)
          (unsafe-set-mcdr! x y)
+         (unsafe-unbox y)
          (unsafe-set-box! x y)
          (unsafe-set-box*! x y)
          (unsafe-bytes-set! x y z)
@@ -3680,12 +3680,49 @@
 
               (procedure? a-x)
               (lambda (x) (values (a-x x)))
-              (lambda (x) (when (a? x) (void (a-x x))))
 
               (procedure? set-a-x!)
               (lambda (x) (values (set-a-x! x 5))))
            '(module m racket/base
               (struct a (x) #:omit-define-syntaxes #:mutable)
+
+              #t
+              (lambda (x) (a x))
+              (lambda (x) a (void))
+
+              #t
+              (lambda (x) (a? x))
+              (lambda (x) a (void))
+              (lambda (x) a #t)
+              (lambda (x) (when (a? x) #t))
+
+              #t
+              (lambda (x) (a-x x))
+
+              #t
+              (lambda (x) (set-a-x! x 5))))
+
+(test-comp '(module m racket/base
+              (struct a (x) #:omit-define-syntaxes #:mutable #:authentic)
+
+              (procedure? a)
+              (lambda (x) (values (a x)))
+              (lambda (x) (void (a x)))
+
+              (procedure? a?)
+              (lambda (x) (values (a? x)))
+              (lambda (x) (void (a? x)))
+              (lambda (x) (boolean? (a? x)))
+              (lambda (x) (when (a? x) (a? x)))
+
+              (procedure? a-x)
+              (lambda (x) (values (a-x x)))
+              (lambda (x) (when (a? x) (void (a-x x))))
+
+              (procedure? set-a-x!)
+              (lambda (x) (values (set-a-x! x 5))))
+           '(module m racket/base
+              (struct a (x) #:omit-define-syntaxes #:mutable #:authentic)
 
               #t
               (lambda (x) (a x))
@@ -5681,7 +5718,7 @@
         (check pred t1 e1)))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Check unboxing with mutual recusion:
+;; Check unboxing with mutual recursion:
 
 (let ()
   ;; Literal lists thwart inlining:
@@ -6105,7 +6142,7 @@
     (void (read (open-input-bytes (get-output-bytes o))))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Check for an optimizer regresssion
+;; Check for an optimizer regression
 
 (err/rt-test (+ (let-values (((x y) (let-values ((() 9)) 2))) x) (error))
              exn:fail?)
@@ -6198,7 +6235,7 @@
 ;; for
 ;;  (lambda (arg-id ...) (define def-id _rhs) ... (arg-id def-id) ...)
 
-(let ()
+(when (run-unreliable-tests? 'timing)
   (define (gensym-n n)
     (let loop ([i n])
       (if (zero? i)
@@ -6509,7 +6546,7 @@
          m)))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Regresssion test for an optimizer bug
+;; Regression test for an optimizer bug
 
 (define (late-inline-with-single-use-that-turns-out-to-be-movable g)
   (let ([x (g)])
@@ -6580,6 +6617,66 @@
     (define es->c (make-e->c es->c^))
 
     6))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(module regression-test-to-make-sure-inlining-does-not-go-crazy racket/base
+  (define (f x)
+    (lambda (y)
+      (letrec ([recursion (f x)])
+        (+ x y)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Regression test provided by @formalizm
+
+(parameterize ([compile-context-preservation-enabled #t])
+  (eval
+   '(module raises-should-be-reached-error racket/base
+      (define (return-false) #f)
+      (define foo
+        (let ([bar (return-false)])
+          (if bar
+              (string-append "bar: " bar)
+              (error "bar is false, so this error is reached")))))))
+(err/rt-test/once (dynamic-require ''raises-should-be-reached-error #f)
+                  exn:fail?
+                  #rx"this error is reached")
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Regression test related to single-use variables
+;; and `with-continuation-mark`
+
+(test #t
+      procedure?
+      (let ((q #f)
+            (n (λ (x) #t)))
+        (let ([h (with-continuation-mark
+                  (set! q 1)
+                  #f
+                  n)])
+          (lambda (x) (h x)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Regression test related to single-use variables
+;; and disabled inlining
+
+(parameterize ([compile-context-preservation-enabled #t]
+               [current-namespace (make-base-namespace)])
+  (void
+   (compile
+    '(module m racket/base
+       (letrec ([f (lambda () 0)]
+                [g (let ([g2
+                          (lambda ()
+                            (let ([x (f)])
+                              (list (lambda () x) h)))])
+                     g2)]
+                [h (letrec ([loop
+                             (lambda ()
+                               (let ([y (g)])
+                                 (list y loop)))])
+                     loop)])
+         h)))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

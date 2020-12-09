@@ -103,6 +103,8 @@
           `(with-continuation-mark ,(optimize* key) ,(optimize* val) ,(optimize* body))]
          [`(begin ,body ...)
           `(begin ,@(optimize*-body body))]
+         [`(begin-unsafe ,body ...)
+          `(begin-unsafe ,@(optimize*-body body))]
          [`(begin0 ,e ,body ...)
           `(begin0 ,(optimize* e) ,@(optimize*-body body))]
          [`(set! ,id ,rhs)
@@ -111,6 +113,7 @@
           unsafe-mode?]
          [`(#%variable-reference) v]
          [`(#%variable-reference ,id) v]
+         [`(quote ,_) v]
          [`(,rator ,exps ...)
           `(,(optimize* rator) ,@(optimize*-body exps))]
          [`,_ v])))

@@ -51,13 +51,10 @@ operations can be prevented by adjusting the code inspector (see
 @defproc[(unsafe-fxabs       [a fixnum?]) fixnum?]
 )]{
 
-For @tech{fixnums}: Like @racket[+], @racket[-], @racket[*],
-@racket[quotient], @racket[remainder], @racket[modulo], and
-@racket[abs], but constrained to consume @tech{fixnums} and produce a
-@tech{fixnum} result. The mathematical operation on @racket[a] and
-@racket[b] must be representable as a @tech{fixnum}. In the case of
-@racket[unsafe-fxquotient], @racket[unsafe-fxremainder], and
-@racket[unsafe-fxmodulo], @racket[b] must not be @racket[0].
+For @tech{fixnums}: Unchecked versions of @racket[fx+], @racket[fx-],
+@racket[fx*], @racket[fxquotient],
+@racket[fxremainder], @racket[fxmodulo], and
+@racket[fxabs]. 
 
 @history[#:changed "7.0.0.13" @elem{Allow zero or more arguments for @racket[unsafe-fx+] and @racket[unsafe-fx*]
                                     and allow one or more arguments for @racket[unsafe-fx-].}]}
@@ -72,22 +69,26 @@ For @tech{fixnums}: Like @racket[+], @racket[-], @racket[*],
 @defproc[(unsafe-fxrshift [a fixnum?] [b fixnum?]) fixnum?]
 )]{
 
-For @tech{fixnums}: Like @racket[bitwise-and], @racket[bitwise-ior],
-@racket[bitwise-xor], @racket[bitwise-not], and
-@racket[arithmetic-shift], but constrained to consume @tech{fixnums};
-the result is always a @tech{fixnum}. The @racket[unsafe-fxlshift] and
-@racket[unsafe-fxrshift] operations correspond to
-@racket[arithmetic-shift], but require non-negative arguments;
-@racket[unsafe-fxlshift] is a positive (i.e., left) shift, and
-@racket[unsafe-fxrshift] is a negative (i.e., right) shift, where the
-number of bits to shift must be no more than the number of bits used to
-represent a @tech{fixnum}. In the case of @racket[unsafe-fxlshift],
-bits in the result beyond the number of bits used to represent a
-@tech{fixnum} are effectively replaced with a copy of the high bit.
+For @tech{fixnums}: Unchecked versions of @racket[fxand], @racket[fxior], @racket[fxxor],
+@racket[fxnot], @racket[fxlshift], and @racket[fxrshift].
 
 @history[#:changed "7.0.0.13" @elem{Allow zero or more arguments for
                                     @racket[unsafe-fxand], @racket[unsafe-fxior],
                                     and @racket[unsafe-fxxor].}]}
+
+
+@deftogether[(
+@defproc[(unsafe-fx+/wraparound [a fixnum?] [b fixnum?]) fixnum?]
+@defproc[(unsafe-fx-/wraparound [a fixnum?] [b fixnum?]) fixnum?]
+@defproc[(unsafe-fx*/wraparound [a fixnum?] [b fixnum?]) fixnum?]
+@defproc[(unsafe-fxlshift/wraparound [a fixnum?] [b fixnum?]) fixnum?]
+)]{
+
+For @tech{fixnums}: Unchecked versions of @racket[fx+/wraparound],
+@racket[fx-/wraparound], @racket[fx*/wraparound], and
+@racket[fxlshift/wraparound].
+
+@history[#:added "7.9.0.6"]}
 
 
 @deftogether[(
@@ -100,9 +101,9 @@ bits in the result beyond the number of bits used to represent a
 @defproc[(unsafe-fxmax [a fixnum?] [b fixnum?] ...) fixnum?]
 )]{
 
-For @tech{fixnums}: Like @racket[=], @racket[<], @racket[>],
-@racket[<=], @racket[>=], @racket[min], and @racket[max], but
-constrained to consume @tech{fixnums}.
+For @tech{fixnums}: Unchecked versions of @racket[fx=], @racket[fx<],
+ @racket[fx>], @racket[fx<=], @racket[fx>=],
+ @racket[fxmin], and @racket[fxmax].
 
 @history[#:changed "7.0.0.13" @elem{Allow one or more argument,
                                     instead of allowing just two.}]}
@@ -154,6 +155,14 @@ For @tech{flonums}: Unchecked (potentially) versions of
 the corresponding safe bindings.}
 
 
+@defproc[(unsafe-flsingle [a flonum?]) flonum?]{
+
+For @tech{flonums}: Unchecked (potentially) version of
+@racket[flsingle].
+
+@history[#:added "7.8.0.7"]}
+
+
 @deftogether[(
 @defproc[(unsafe-flsin [a flonum?]) flonum?]
 @defproc[(unsafe-flcos [a flonum?]) flonum?]
@@ -172,6 +181,7 @@ For @tech{flonums}: Unchecked (potentially) versions of
 @racket[flacos], @racket[flatan], @racket[fllog], @racket[flexp],
 @racket[flsqrt], and @racket[flexpt]. Currently, some of these
 bindings are simply aliases for the corresponding safe bindings.}
+
 
 @deftogether[(
 @defproc[(unsafe-make-flrectangular [a flonum?] [b flonum?])
@@ -196,10 +206,10 @@ For @tech{flonums}: Unchecked versions of @racket[make-flrectangular],
 @defproc[(unsafe-fx->fl [a fixnum?]) flonum?]
 @defproc[(unsafe-fl->fx [a flonum?]) fixnum?]
 )]{
-Unchecked conversion of a fixnum to an integer flonum and vice versa.
-These are similar to the safe bindings @racket[->fl] and @racket[fl->exact-integer],
-but further constrained to consume or produce a fixnum.
-}
+Unchecked versions of @racket[fx->fl] and @racket[fl->fx].
+
+@history[#:changed "7.7.0.8" @elem{Changed @racket[unsafe-fl->fx] to truncate.}]}
+
 
 @defproc[(unsafe-flrandom [rand-gen pseudo-random-generator?]) (and flonum? (>/c 0) (</c 1))]{
 
@@ -292,6 +302,16 @@ A vector's size can never be larger than a @tech{fixnum}, so even
 
 @history[#:changed "6.11.0.2" @elem{Added @racket[unsafe-vector*-cas!].}]}
 
+
+@defproc[(unsafe-vector*->immutable-vector! [v (and/c vector? (not/c impersonator?))]) (and/c vector? immutable?)]{
+
+Similar to @racket[vector->immutable-vector], but potentially destroys
+@racket[v] and reuses it space, so @racket[v] must not be used after
+calling @racket[unsafe-vector*->immutable-vector!].
+
+@history[#:added "7.7.0.6"]}
+
+
 @deftogether[(
 @defproc[(unsafe-string-length [str string?]) fixnum?]
 @defproc[(unsafe-string-ref [str string?] [k fixnum?])
@@ -305,17 +325,43 @@ only when the result will be a Latin-1 character. A string's size can
 never be larger than a @tech{fixnum} (so even @racket[string-length]
 always returns a fixnum).}
 
+@defproc[(unsafe-string->immutable-string! [str string?]) (and/c string? immutable?)]{
+
+Similar to @racket[string->immutable-string], but potentially destroys
+@racket[str] and reuses it space, so @racket[str] must not be used
+after calling @racket[unsafe-string->immutable-string!].
+
+@history[#:added "7.7.0.6"]}
+
 
 @deftogether[(
 @defproc[(unsafe-bytes-length [bstr bytes?]) fixnum?]
 @defproc[(unsafe-bytes-ref [bstr bytes?] [k fixnum?]) byte?]
 @defproc[(unsafe-bytes-set! [bstr (and/c bytes? (not/c immutable?))] [k fixnum?] [b byte?]) void?]
+@defproc[(unsafe-bytes-copy! [dest (and/c bytes? (not/c immutable?))]
+                             [dest-start fixnum?]
+                             [src bytes?]
+                             [src-start fixnum? 0]
+                             [src-end fixnum? (bytes-length src)])
+         void?]
 )]{
 
-Unsafe versions of @racket[bytes-length], @racket[bytes-ref], and
-@racket[bytes-set!]. A bytes's size can never be larger than a
+Unsafe versions of @racket[bytes-length], @racket[bytes-ref],
+@racket[bytes-set!], and @racket[bytes-copy!].
+A bytes's size can never be larger than a
 @tech{fixnum} (so even @racket[bytes-length] always returns a
-fixnum).}
+fixnum).
+
+@history[#:changed "7.5.0.15" @elem{Added @racket[unsafe-bytes-copy!].}]}
+
+
+@defproc[(unsafe-bytes->immutable-bytes! [bstr bytes?]) (and/c bytes? immutable?)]{
+
+Similar to @racket[bytes->immutable-bytes], but potentially destroys
+@racket[bstr] and reuses it space, so @racket[bstr] must not be used
+after calling @racket[unsafe-bytes->immutable-bytes!].
+
+@history[#:added "7.7.0.6"]}
 
 
 @deftogether[(
@@ -633,10 +679,9 @@ aliases for the corresponding safe bindings.}
 @defproc[(unsafe-fx->extfl [a fixnum?]) extflonum?]
 @defproc[(unsafe-extfl->fx [a extflonum?]) fixnum?]
 )]{
-Unchecked conversion of a @tech{fixnum} to an integer @tech{extflonum} and vice versa.
-These are similar to the safe bindings @racket[->extfl] and @racket[extfl->exact-integer],
-but further constrained to consume or produce a fixnum.
-}
+Unchecked (potentially) versions of @racket[fx->extfl] and @racket[extfl->fx].
+
+@history[#:changed "7.7.0.8" @elem{Changed @racket[unsafe-fl->fx] to truncate.}]}
 
 @deftogether[(
 @defproc[(unsafe-extflvector-length [v extflvector?]) fixnum?]

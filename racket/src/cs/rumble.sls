@@ -11,6 +11,7 @@
           call-with-current-continuation
           call-with-composable-continuation
           call-with-escape-continuation
+          call-in-continuation
           continuation?
 
           make-continuation-prompt-tag
@@ -48,11 +49,14 @@
           chaperone-continuation-mark-key
           call-with-system-wind ; not exported to Racket
 
+          call-with-current-continuation-roots ; not exported to Racket
+
           ;; not exported to Racket:
           make-engine
           engine-block
           engine-timeout
           engine-return
+          engine-roots
           call-with-engine-completion
           set-ctl-c-handler!
           get-ctl-c-handler
@@ -87,7 +91,6 @@
           linklet-instantiate-key ; not exported to Racket
           set-error-display-eprintf! ; not exported to Racket
           set-log-system-message! ; not exported to Racket
-          set-convert-source-file-descriptor-path! ; not exported to Racket
 
           current-inspector
           make-inspector
@@ -160,9 +163,10 @@
           primitive?
           primitive-closure?
           primitive-result-arity
-          make-jit-procedure ; not exported to racket
-          |#%name|           ; not exported to racket
-          |#%method-arity|   ; not exported to racket
+          make-jit-procedure    ; not exported to racket
+          make-interp-procedure ; not exported to racket
+          |#%name|              ; not exported to racket
+          |#%method-arity|      ; not exported to racket
 
           equal?
           equal?/recur
@@ -217,10 +221,10 @@
           make-struct-field-accessor
           make-struct-field-mutator
           struct-type-constructor-add-guards ; not exported to Racket
-          register-struct-constructor! ; not exported to Racket
-          register-struct-predicate! ; not exported to Racket
-          register-struct-field-accessor! ; not exported to Racket
-          register-struct-field-mutator! ; not exported to Racket
+          |#%struct-constructor| ; not exported to Racket
+          |#%struct-predicate| ; not exported to Racket
+          |#%struct-field-accessor| ; not exported to Racket
+          |#%struct-field-mutator| ; not exported to Racket
           struct-property-set!  ; not exported to Racket
           struct-constructor-procedure?
           struct-predicate-procedure?
@@ -276,7 +280,7 @@
           unsafe-weak-hash-iterate-key+value unsafe-weak-hash-iterate-pair
           unsafe-hash-seal!    ; not exported to racket
 
-          hash? hash-eq? hash-equal? hash-eqv? hash-weak? immutable-hash?
+          hash? hash-eq? hash-equal? hash-eqv? hash-weak?
           hash-count
           hash-keys-subset?
           eq-hashtable->hash   ; not exported to racket
@@ -402,6 +406,7 @@
           fx->fl
           fxrshift
           fxlshift
+          fxlshift/wraparound
           fl->fx
           ->fl
           fl->exact-integer
@@ -425,12 +430,7 @@
                   [inline:set-mcar! set-mcar!]
                   [inline:set-mcdr! set-mcdr!])
 
-          flvector?
-          (rename [new-flvector flvector])
           make-flvector
-          flvector-length
-          flvector-ref
-          flvector-set!
           flvector-copy
           shared-flvector
           make-shared-flvector
@@ -480,6 +480,7 @@
           set-reachable-size-increments-callback! ; not exported to Racket
           set-custodian-memory-use-proc!          ; not exported to Racket
           set-immediate-allocation-check-proc!    ; not exported to Racket
+          set-incremental-collection-enabled!     ; not exported to Racket
           unsafe-add-collect-callbacks
           unsafe-remove-collect-callbacks
 
@@ -529,6 +530,10 @@
           unsafe-fxnot
           unsafe-fxrshift
           unsafe-fxlshift
+          unsafe-fx+/wraparound
+          unsafe-fx-/wraparound
+          unsafe-fx*/wraparound
+          unsafe-fxlshift/wraparound
 
           unsafe-fx=
           unsafe-fx<
@@ -563,6 +568,7 @@
           unsafe-flfloor
           unsafe-flceiling
           unsafe-fltruncate
+          unsafe-flsingle
 
           unsafe-flsin
           unsafe-flcos
@@ -596,7 +602,9 @@
           unsafe-extfl->fx unsafe-fx->extfl unsafe-extflsqrt
           unsafe-extflvector-length unsafe-extflvector-ref unsafe-extflvector-set!
 
+          set-prepare-for-place!     ; not exported to Racket
           set-start-place!           ; not exported to Racket
+          set-destroy-place!         ; not exported to Racket
           fork-place                 ; not exported to Racket
           start-place                ; not exported to Racket
           place-enabled?
@@ -669,6 +677,7 @@
           unsafe-bytes-length
           unsafe-bytes-ref
           unsafe-bytes-set!
+          unsafe-bytes-copy!
 
           unsafe-undefined
           check-not-unsafe-undefined
@@ -684,6 +693,7 @@
           unsafe-struct*-set!
           unsafe-struct*-cas!
           unsafe-struct? ; not exported to racket
+          unsafe-struct  ; not exported to racket
 
           unsafe-s16vector-ref
           unsafe-s16vector-set!
@@ -693,6 +703,10 @@
           unsafe-f64vector-set!
           unsafe-f80vector-set!
           unsafe-f80vector-ref
+
+          unsafe-bytes->immutable-bytes!
+          unsafe-string->immutable-string!
+          unsafe-vector*->immutable-vector!
 
           ;; --- not exported to Racket: ---
           make-pthread-parameter
@@ -820,7 +834,6 @@
   (set-impersonator-applicables!)
   (set-mpair-hash!)
   (set-hash-hash!)
-  (set-flvector-hash!)
   (set-extflonum-print!)
   (set-impersonator-hash!)
   (set-procedure-impersonator-hash!)

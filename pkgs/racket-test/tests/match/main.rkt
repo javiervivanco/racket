@@ -3,7 +3,8 @@
 (require (for-syntax scheme/base)
          "match-tests.rkt" "match-exn-tests.rkt" "other-plt-tests.rkt" "other-tests.rkt"
          "examples.rkt"
-         rackunit rackunit/text-ui)
+         rackunit rackunit/text-ui
+         (only-in racket/base local-require))
 
 (require mzlib/plt-match)
 
@@ -15,11 +16,11 @@
                          (check eq? #t (match '(tile a b c)
                                          [`(tile ,@'(a b c))
                                           #t]
-                                         [else #f]))
+                                         [_ #f]))
                          (check eq? #t (match '(tile a b c)
                                          [`(tile ,@`(a b c))
                                           #t]
-                                         [else #f])))))
+                                         [_ #f])))))
 (define cons-tests
   (test-suite "Tests for cons pattern"
               (test-case "simple"
@@ -158,6 +159,25 @@
                 (check = 7 (match (list (make-point 2 3))
                              [(list (Point (app add1 x) (app add1 y))) (+ x y)]))
                 ))
+
+   (test-case "Expander which accepts a dotted list syntax"
+              (let ()
+                (define-match-expander bar
+                  (lambda (stx)
+                    (syntax-case stx ()
+                      [(_ a b . c)
+                       #'(and (app sub1 c) (app a b))]))
+                  +)
+                ;; check that it works as a pattern
+                (check = 3 (match 4 [(bar add1 5 . x) x]))
+                ;; check that sub-patterns still work on the dotted argument
+                (check = 3 (match 4 [(bar add1 5 . (? number? y)) y]))
+                (check = 3 (match 4 [(bar add1 5 ? number? y) y]))
+                ;; check that it works inside other patterns, e.g. a list
+                (check-equal? '(4 6 8) (match '(5 7 9)
+                                         [(list (bar add1 number? . x) ...) x]))
+                ;; check that it works as an expression
+                (check = 12 (apply bar '(3 4 5))))) ; bar works like +
    ))
 
 (define simple-tests 
@@ -177,7 +197,7 @@
                 (define (origin? pt)
                   (match pt
                     ((struct point (0 0)) #t)
-                    (else #f)))
+                    (_ #f)))
                 (check-true (origin? (make-point 0 0)))
                 (check-false (origin? (make-point 1 1)))))
    ; These tests ensures that the unsafe struct optimization is correct
@@ -189,7 +209,7 @@
                   (define (origin? pt)
                     (match pt
                       ((struct point (0 0)) #t)
-                      (else #f)))
+                      (_ #f)))
                   (check-true (origin? (make-point 'a 0 0)))
                   (check-false (origin? (make-point 'a 1 1))))))
    (test-case "struct patterns (with fake struct info)"
@@ -201,7 +221,7 @@
                 (define (origin? pt)
                   (match pt
                     ((struct point (0 1)) #t)
-                    (else #f)))
+                    (_ #f)))
                 (check-true (origin? (list 0 1)))
                 (check-false (origin? (list 1 1)))
                 (check-false (origin? (list 1 1 1)))
@@ -280,6 +300,10 @@
                 (check =  0 (value))))
    
    ))
+
+(module test-struct*-struct-info racket/base
+  (struct foo (a))
+  (provide (rename-out [foo bar])))
 
 (define struct*-tests
   (test-suite 
@@ -362,7 +386,24 @@
                       [val b]))]))
                  (make-tree 0 (make-tree 1 #f #f) #f))
                 (check = 0 a)
-                (check = 1 b)))))
+                (check = 1 b)))
+   (test-case "also from documentation"
+              (let ()
+                (define-struct tree (val left right))
+                (define-struct (tree* tree) (val))
+                (match-define
+                  (and (struct* tree* ([val a]))
+                       (struct* tree ([val b])))
+                  (tree* 0 #f #f 42))
+                (check = 42 a)
+                (check = 0 b)))
+   (test-case "hygiene"
+              (let ()
+                (local-require 'test-struct*-struct-info)
+                (match-define
+                  (struct* bar ([a x]))
+                  (bar 1))
+                (check = x 1)))))
 
 (define plt-match-tests
   (test-suite "Tests for plt-match.rkt"

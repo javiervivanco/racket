@@ -107,11 +107,15 @@
                      (test v name ((eval `(lambda (y) (let ([x1 (fx+ (random 1) ',arg1)])
                                                         (,op x1 y))))
                                    arg2)))))]
-	 [bin-exact (lambda (v op arg1 arg2 [check-fixnum-as-bad? #f] #:bad-value [bad-value 'bad])
-		      (check-error-message op (eval `(lambda (x) (,op x ',arg2))) #:bad-value bad-value)
+	 [bin-exact (lambda (v op arg1 arg2 [check-fixnum-as-bad? #f]
+                               #:bad-value [bad-value 'bad]
+                               #:bad-as-second-only? [bad-as-second-only? #f])
+                      (unless bad-as-second-only?
+                        (check-error-message op (eval `(lambda (x) (,op x ',arg2))) #:bad-value bad-value))
 		      (check-error-message op (eval `(lambda (x) (,op ',arg1 x))) #:bad-value bad-value)
 		      (check-error-message op (eval `(lambda (x y) (,op x y))) #:first-arg arg1 #:bad-value bad-value)
-		      (check-error-message op (eval `(lambda (x y) (,op x y))) #:second-arg arg2 #:bad-value bad-value)
+                      (unless bad-as-second-only?
+                        (check-error-message op (eval `(lambda (x y) (,op x y))) #:second-arg arg2 #:bad-value bad-value))
                       (when check-fixnum-as-bad?
                         (check-error-message op (eval `(lambda (x) (,op x ',arg2))) #t)
                         (check-error-message op (eval `(lambda (x) (,op x 10))) #t)
@@ -547,7 +551,14 @@
     (un-exact -1 'fl->exact-integer -1.0)
     (un-exact (inexact->exact 5e200) 'fl->exact-integer 5e200)
     (un-exact 11 'fl->fx 11.0 #t)
+    (un-exact 11 'fl->fx 11.5 #t)
     (un-exact -11 'fl->fx -11.0)
+    (un-exact -11 'fl->fx -11.5)
+    (check-error-message 'fl->fx (eval `(lambda (x) (fl->fx x))) #:bad-value (exact->inexact (expt 2 100)))
+    (check-error-message 'fl->fx (eval `(lambda (x) (fl->fx x))) #:bad-value (exact->inexact (- (expt 2 100))))
+    (check-error-message 'fl->fx (eval `(lambda (x) (fl->fx x))) #:bad-value +inf.0)
+    (check-error-message 'fl->fx (eval `(lambda (x) (fl->fx x))) #:bad-value -inf.0)
+    (check-error-message 'fl->fx (eval `(lambda (x) (fl->fx x))) #:bad-value +nan.0)
 
     (un 4 '+ 4)
     (bin 11 '+ 4 7)
@@ -558,6 +569,7 @@
     (tri 13/2 '+ (lambda () 1) 5/2 3 void)
     (bin-exact 25 'fx+ 10 15)
     (tri-exact 33 'fx+ (lambda () 10) 15 8 void #f)
+    (bin-exact 25 'fx+/wraparound 10 15)
     (bin-exact 3.4 'fl+ 1.1 2.3 #t)
     (tri-exact 7.4 'fl+ (lambda () 1.1) 2.3 4.0 void #f)
 
@@ -572,6 +584,7 @@
     (tri 13/2 '- (lambda () 10) 3 1/2 void)
     (un-exact -3 'fx- 3)
     (bin-exact 13 'fx- 5 -8)
+    (bin-exact 13 'fx-/wraparound 5 -8)
     (tri-exact 14 'fx- (lambda () 5) -8 -1 void #f)
     (un-exact -3.6 'fl- 3.6)
     (bin-exact -0.75 'fl- 1.5 2.25 #t)
@@ -592,6 +605,7 @@
     (tri 5 '* (lambda () 2) 3 5/6 void)
     (un-exact 11 'fx* 11)
     (bin-exact 253 'fx* 11 23)
+    (bin-exact 253 'fx*/wraparound 11 23)
     (bin-exact 2.53 'fl* 1.1 2.3 #t)
     (tri-exact 506 'fx* (lambda () 11) 23 2 void #f)
     (tri-exact 7.59 'fl* (lambda () 1.1) 2.3 3.0 void #f)
@@ -722,7 +736,15 @@
     (bin-exact 2 'arithmetic-shift (expt 2 33) -32)
     (bin-exact 8 'arithmetic-shift (expt 2 33) -30)
     (bin-exact 4 'fxlshift 2 1)
+    (bin-exact 4 'fxlshift 2 1 #:bad-value -2 #:bad-as-second-only? #t)
+    (bin-exact 4 'fxlshift 2 1 #:bad-value 100 #:bad-as-second-only? #t)
     (bin-exact 1 'fxrshift 2 1)
+    (bin-exact 1 'fxrshift 2 1 #:bad-value -2 #:bad-as-second-only? #t)
+    (bin-exact 1 'fxrshift 2 1 #:bad-value 100 #:bad-as-second-only? #t)
+
+    (bin-exact 4 'fxlshift/wraparound 2 1)
+    (bin-exact 4 'fxlshift/wraparound 2 1 #:bad-value -2 #:bad-as-second-only? #t)
+    (bin-exact 4 'fxlshift/wraparound 2 1 #:bad-value 100 #:bad-as-second-only? #t)
 
     (un-exact -1 'bitwise-not 0)
     (un-exact 0 'bitwise-not -1)
@@ -910,7 +932,14 @@
       (un-exact -1 'extfl->exact-integer -1.0t0)
       (un-exact (inexact->exact 5e200) 'extfl->exact-integer (real->extfl 5e200))
       (un-exact 11 'extfl->fx 11.0t0 #t)
+      (un-exact 11 'extfl->fx 11.5t0 #t)
       (un-exact -11 'extfl->fx -11.0t0)
+      (un-exact -11 'extfl->fx -11.5t0)
+      (check-error-message 'extfl->fx (eval `(lambda (x) (extfl->fx x))) #:bad-value (->extfl (expt 2 100)))
+      (check-error-message 'extfl->fx (eval `(lambda (x) (extfl->fx x))) #:bad-value (->extfl (- (expt 2 100))))
+      (check-error-message 'extfl->fx (eval `(lambda (x) (extfl->fx x))) #:bad-value +inf.t)
+      (check-error-message 'extfl->fx (eval `(lambda (x) (extfl->fx x))) #:bad-value -inf.t)
+      (check-error-message 'extfl->fx (eval `(lambda (x) (extfl->fx x))) #:bad-value +nan.t)
 
       (bin-exact -0.75t0 'extfl- 1.5t0 2.25t0 #t)
 

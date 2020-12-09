@@ -9,8 +9,8 @@ root directory.
  License and external links
 ========================================================================
 
-Racket is distributed under the GNU Lesser General Public License
-(LGPL). See "LICENSE.txt" for more information.
+Racket is distributed under the MIT license and the Apache version 2.0
+license, at your option. See "LICENSE.txt" for more information.
 
 Compiled executables, documentation, and up-to-date information:
    http://racket-lang.org/
@@ -26,67 +26,51 @@ Report bugs:
 
 
 ========================================================================
- Traditional Racket versus Racket-on-Chez
+ Racket CS (Chez Scheme) versus Racket BC (ByteCode / Before Chez)
 ========================================================================
 
 This source directory contains implementations for two different
-versions of Racket: the traditional implementation that is
-substantially implemented in C, and an implementation that builds on
-Chez Scheme.
+versions of Racket: the original BC implementation that is
+substantially implemented in C, and the CS implementation that is
+implemented in Chez Scheme and Racket (compiled to Chez Scheme).
 
-Traditional Racket
-------------------
+Racket CS
+---------
 
-By default, `configure` and the Windows scripts build the traditional
+By default, `configure` and the Windows scripts build the CS
 implementation of Racket.
 
-If you need more information specific to the traditional
-implementation of Racket, see "racket/README.txt".
+Chez Scheme is included in Racket source distributions and the source
+repository.
 
-Racket on Chez Scheme
----------------------
-
-To build Racket-on-Chez on Unix variants or Mac OS:
-
- * ... in addition to the traditional variant of Racket: supply
-   `--enable-cs` or `--enable-csdefault` to `configure`.
-
-   The generated Racket-on-Chez executables will have a "cs" suffix
-   for `--enable-cs`, and it will not have a "cs" suffix for
-   `--enable-csdefault`. Also, plain `make` will still build the
-   traditional Racket implementation with `--enable-cs`; use `make cs`
-   to build and `make install-cs` to install. With
-   `--enable-csdefault`, plain `make` and `make install` will build
-   and install Racket-on-Chez.
-
- * ... by itself: supply `--enable-csonly` to `configure`.
- 
-   The generated Racket-on-Chez executables will *not* have a "cs"
-   suffix. Unlike `--enable-csdefault`, you must specify an existing
-   Racket using `--enable-racket=...`.
-
-Chez Scheme is included in a Racket source distribution and
-`configure` detects that source, so no separate download or Git
-checkout is needed in that case.
-
-Chez Scheme is not included in the Racket Git repository. Building
-Racket-on-Chez from a Git checkout requires a "ChezScheme" build
-checkout within the build directory or at at an alternate location
-specified by the `--enable-scheme=...` argument to `configure`.
-
-Use the patched version of Chez Scheme at
-
-    https://github.com/racket/ChezScheme
-
-We hope to eventually return to the current development version from
-
-    https://github.com/cisco/ChezScheme
-
-To build Racket-on-Chez on Windows, see See "worksp\README.txt" for
+To build Racket CS on Windows, see See "worksp\README.txt" for
 information.
 
-If you need more information specific to Racket-on-Chez, see
+If you need more information specific to Racket CS, see
 "cs/README.txt".
+
+Racket BC
+---------
+
+To build Racket BC on Unix variants or Mac OS:
+
+ * ... in addition Racket CS: supply `--enable-cs --enable-bc` to
+   `configure`.
+
+   The generated Racket BC executables will have a "bc" suffix. A
+   plain `make` will still build Racket CS; use `make bc` to build and
+   `make install-bc` to install.
+
+ * ... by itself: supply `--enable-bcdefault` to `configure`.
+ 
+   The generated Racket BC executables will *not* have a "bc" suffix.
+
+To build Racket BC on Windows, see See "worksp\README.txt" for
+information.
+
+If you need more information specific to Racket BC, see
+"bc/README.txt".
+
 
 
 ========================================================================
@@ -105,7 +89,7 @@ Quick instructions:
    make install
 
  Those commands will create an in-place installation of Racket and
- store the results of C compilation in a separate "build"
+ store the results of intermediate compilation in a separate "build"
  subdirectory, which is useful if you need to update your sources,
  delete the build, and start from scratch.
 
@@ -113,11 +97,11 @@ Quick instructions:
  you don't anticipate updating/rebuilding, but it will be harder to
  restart from scratch should you need to.
 
- Some build modes may require GNU `make`. For example, when building
- the traditional Racket implementation, the content of the "foreign"
- subdirectory requires GNU `make` if no installed "libffi" is
- detected. If the build fails with another variant of `make`, please
- try using GNU `make`.
+ Some build modes may require GNU Make. For example, when building the
+ Racket CS implementation, GNU Make is required. When building the
+ Racket BC implementation, the content of the "foreign" subdirectory
+ requires GNU Make if no installed "libffi" is detected. If the build
+ fails with another variant of `make`, please try using GNU Make.
 
 Detailed instructions:
 
@@ -156,12 +140,12 @@ Detailed instructions:
 
  2. From your build directory, run the script `configure` (which is in
     the same directory as this README), with optional command-line
-    arguments `--prefix=TARGETDIR` or `--enable-shared` (or both).
+    arguments like `--prefix=TARGETDIR`.
 
-    For example, if you want to install into "/usr/local/racket" using
-    dynamic libraries, then run:
+    For example, if you want to install into "/usr/local/racket", then
+    run:
 
-      [here]configure --prefix=/usr/local/racket --enable-shared
+      [here]configure --prefix=/usr/local/racket
 
     Again, "[here]" is the directory path containing the `configure`
     script. If you follow the convention of running from a "build"
@@ -216,8 +200,8 @@ Detailed instructions:
  3. Run `make`.  [As noted above, this might need to be GNU `make`.]
 
     Executables and libraries are placed in subdirectories of the
-    build directory. For example, the `racket3m` executable appears in
-    the "racket" directory.
+    build directory. For example, the `racketcs` executable appears in
+    the "cs/c" directory.
 
     You can run executables in-place before `make install`, but if you
     haven't yet built ".zo" bytecode files from Racket sources in
@@ -262,9 +246,9 @@ Detailed instructions:
     may accumulate user- and version-specific information in your
     "add-ons" directory, which you can most easily find by evaluating
       (find-system-path 'addon-dir)
-    in Racket.  In addition, if you configure with `--enabled-shared`,
-    you may accumulate many unused versions of the dynamic libraries in
-    your installation target.
+    in Racket. In addition, on Mac OS or if you configure with
+    `--enabled-shared` for Racket BC, you may accumulate many unused
+    versions of the dynamic libraries in your installation target.
 
 After an "in-place" install from a source distribution, the
 "racket/src" directory is no longer needed, and it can be safely
@@ -284,6 +268,17 @@ First, install Xcode and command-line tools from Apple.
 
 After installing developer tools, follow the Unix instructions above,
 but note the following:
+
+ * If you are building from a source distribution (as opposed to a Git
+   repository checkout), then most likely "racket-lib" is already
+   included and installed as part of the the distribution, but without
+   dependencies of "racket-lib" that are specific to Mac OS. In that
+   case, use
+
+      raco pkg update --auto racket-lib
+
+   using `raco` as created by `make install` to download and install
+   the dependencies.
 
  * The Racket build creates a framework, "Racket.framework", which is
    installed into "racket/lib".  This framework is used by the `racket`
@@ -324,7 +319,7 @@ but note the following:
 ========================================================================
 
 To compile with Microsoft Visual C, see the instructions in
-"racket\src\worksp\README.txt".
+"worksp\README.txt".
 
 To compile with MinGW tools, follow the Unix instructions above; do
 not use `--enable-shared`, because DLLs will be generated
@@ -347,9 +342,8 @@ Cross-compilation requires at least two flags to `configure`:
 
  * `--enable-racket=RACKET`, where RACKET is a path to a Racket
    executable that runs on the build platform; the executable must be
-   the same version of Racket and the same virtual machine (i.e.,
-   traditional Racket or Racket on Chez Scheme) as being built for the
-   target platform.
+   the same version of Racket and the same virtual machine (i.e., CS
+   or BC) as being built for the target platform.
 
    This flag is needed because building and installing Racket requires
    running (an existing build of) Racket.
@@ -359,14 +353,13 @@ Cross-compilation requires at least two flags to `configure`:
    run `configure` again (with no arguments) in a "local" subdirectory
    to create a build for the current platform.
 
-For Racket-on-Chez, an additional flag is needed:
+An additional flag is needed for building Racket CS, unless the flag
+`--enable-racket=auto` is used:
 
- * `--enable-scheme=SCHEME`, where SCHEME is a path to a Chez Scheme
-   build directory. Chez Scheme must be built there already for the
-   current platform, and a cross-compiled Chez Scheme will be created
-   in the same directory.
+ * `--enable-scheme=DIR`, where DIR is a path that has a "ChezScheme"
+   directory where Chez Scheme is built for the host system.
 
-Some less commonly needed `configure` flags for traditional Racket:
+Some less commonly needed `configure` flags are for Racket BC:
 
  * `--enable-stackup`, if the target platform`s stack grows up.
 
@@ -382,8 +375,8 @@ Some less commonly needed `configure` flags for traditional Racket:
  Cross-compiling for Android
 ========================================================================
 
-[Currently, cross-compilation for Android works only for the
- traditional Racket implementation.]
+[Currently, cross-compilation for Android works only for the Racket BC
+ implementation.]
 
 As an example of cross-compiling, to compile for Android on ARM using
 the NDK, use (all on one line)
@@ -405,7 +398,7 @@ the [comp] of your choice and the [platform] used to compile.
  Cross-compiling for iOS
 ========================================================================
 
-[Currently, cross-compilation works only for the traditional Racket
+[Currently, cross-compilation works only for the Racket BC
  implementation.]
 
 To compile the Racket runtime system as a Framework for iOS, use (all
@@ -448,36 +441,10 @@ of the `racket` executable (and variants), while "../collects"
 contains the additional Racket libraries that are included in a
 minimal Racket distribution.
 
-Sources for the traditional Racket implementation
--------------------------------------------------
+Sources for the Racket CS implementation
+----------------------------------------
 
- * "racket" --- traditional `racket` executable
-
-   This implementation can build from "scratch" with a C compiler, but
-   first by building a CGC variant of Racket to transform the C
-   sourses to build a (normal) 3m variant.
-
- * "gracket" --- traditional `gracket` executable
-
- * "foreign" --- FFI implementation for "racket"
-
-   This directory includes a copy of "libffi" (as needed for some
-   platforms).
-
- * "mzcom" --- MzCOM executable (for Windows)
-
- * "mysink" --- `ffi/unsafe/com` helper DLL (for Windows)
-
-See also the shared sources below, which includes rktio and the macro
-expander.
-
-Sources for the Racket-on-Chez implementation
----------------------------------------------
-
- * "cs" --- Racket-on-Chez `racket` executable
-
-   Building requires both an existing Racket (possibly created from
-   the "racket" sources) and an existing Chez Scheme build.
+ * "cs" --- `racket` CS executable
 
  * "thread" --- thread scheduler
 
@@ -490,6 +457,28 @@ Sources for the Racket-on-Chez implementation
 See also the shared sources below, which includes rktio, the macro
 expander, and schemify.
 
+Sources for the Racket BC implementation
+-------------------------------------------------
+
+ * "bc" --- `racket` BC executable
+
+   This implementation can build from "scratch" with a C compiler, but
+   first by building a CGC variant of Racket to transform the C
+   sourses to build a (normal) 3m variant.
+
+ * "mzcom" --- MzCOM executable (for Windows)
+
+ * "mysink" --- `ffi/unsafe/com` helper DLL (for Windows)
+
+ * "cify" --- a Racket-to-C compiler
+
+   This compiler is used only when embedding the expander as C code in
+   Racket BC, instead of Racket bytecode, which is the default for
+   platforms where the Racket BC JIT is not supported.
+
+See also the shared sources below, which includes rktio and the macro
+expander.
+
 Sources shared by both Racket implementations
 ---------------------------------------------
 
@@ -497,13 +486,14 @@ Sources shared by both Racket implementations
 
    This expander is both included in Racket executables and used to
    expand itself for inclusion in executables. It's also used to
-   expand other libraries for inclusion in Racket-on-Chez executables.
+   expand other libraries for inclusion in Racket CS executables, but
+   already-expanded versions are included with source in
+   "cs/schemified".
 
    If you change the expander, run `make` in its directory to generate
    the "startup.inc" file that holds the expander's implementation for
-   the traditional Racket variant. The Racket-on-Chez build (which
-   needs an existing Racket to build, anyway) picks up changes to
-   "expander" automatically.
+   Racket BC. Also, run `make` in "cs" to rebuild expanded libraries
+   for Racket CS.
 
  * "rktio" --- portability layer for low-level I/O
 
@@ -513,20 +503,13 @@ Sources shared by both Racket implementations
 
  * "schemify" --- a Racket-to-Scheme compiler, used by "cs" and "cify"
 
-        Similar to "expander", this layer is applied to itself and
-        other libraries for inclusion in "cs".
-
-
- * "cify" --- a Racket-to-C compiler
-
-   This compiler is used only when embedding the expander as C code,
-   instead of Racket bytecode, which is the default for platforms
-   where the traditional Racket JIT is not supported.
+   Similar to "expander", this layer is applied to itself and other
+   libraries for inclusion in "cs". If you change it, be sure to run
+   `make` in "cs".
 
  * "start" --- main-executable wrapper
 
-   Startup wrappers used by both the tradition and Racket-on-CS
-   implementations. 
+   Startup wrappers used by both the Racket CS and BC implementations.
 
  * "worksp" --- Windows projects and build scripts
 
@@ -553,4 +536,3 @@ More shared utilities
  * "lt" --- `libtool` and `configure` support
 
  * "utils" --- miscellaneous
-

@@ -4,8 +4,11 @@
 (Section 'basic)
 
 (require racket/flonum
+         racket/fixnum
          racket/function
          racket/list
+         racket/symbol
+         racket/keyword
          (prefix-in k: '#%kernel))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -151,6 +154,31 @@
 (test #f list? y)
 (test #f list? (cons 'a 4))
 (arity-test list? 1 1)
+
+;; Try to check that `list?` is amortized constant-time
+(when (run-unreliable-tests? 'timing)
+  (define expected #f)
+  (define (check-time thunk)
+    (define start (current-process-milliseconds))
+    (thunk)
+    (define duration (- (current-process-milliseconds) start))
+    (cond
+      [(not expected) (set! expected duration)]
+      [else
+       (test #t < duration (+ (* 2 expected) 10))]))
+  (define (try range)
+    (for ([n range])
+      (define l (for/list ([i (in-range n)]) i))
+      (define nl (append l 'no))
+
+      (check-time (lambda ()
+                    (test #t 'list
+                          (for/and ([i 10000]) (list? l)))))
+      (check-time (lambda ()
+                    (test #f 'non-list
+                          (for/or ([i 10000]) (list? nl)))))))
+  (try (in-range  1000  1010))
+  (try (in-range 10000 10010)))
 
 (test #t pair? '(a . b))
 (test #t pair? '(a . 1))
@@ -392,6 +420,16 @@
 (test #t eq? (hasheq) (hash-remove (hasheq 3 4) 3))
 (test #t eq? (hasheqv) (hash-remove (hasheqv 3 4) 3))
 
+(err/rt-test (hash 1))
+(err/rt-test (hasheqv 1))
+(err/rt-test (hasheq 1))
+(err/rt-test (make-hash 1))
+(err/rt-test (make-hasheqv 1))
+(err/rt-test (make-hasheq 1))
+(err/rt-test (make-weak-hash 1))
+(err/rt-test (make-weak-hasheqv 1))
+(err/rt-test (make-weak-hasheq 1))
+
 (test #t symbol? 'foo)
 (test #t symbol? (car '(a b)))
 (test #f symbol? "bar")
@@ -432,10 +470,13 @@
 (test "cb" 'string-set! x)
 (test "ab" symbol->string y)
 (test y string->symbol "ab")
+(err/rt-test (string->symbol 10))
+(err/rt-test (string->symbol 'oops))
 
 (test #f eq? (symbol->string 'apple) (symbol->string 'apple))
 (test "apple" symbol->immutable-string 'apple)
 (test #t immutable? (symbol->immutable-string 'apple))
+(test #t immutable? (symbol->immutable-string 'box))
 
 #ci(test #t eq? 'mISSISSIppi 'mississippi)
 #ci(test #f 'string->symbol (eq? 'bitBlt (string->symbol "bitBlt")))
@@ -781,6 +822,7 @@
 (err/rt-test (string-set! hello-string 5 #\a) exn:application:mismatch?)
 (err/rt-test (string-set! hello-string -1 #\a))
 (err/rt-test (string-set! hello-string (expt 2 100) #\a) exn:application:mismatch?)
+(err/rt-test (string-set! (string #\4 #\5 #\6) 4 #\?) exn:fail:contract? #rx"[[]0, 2[]]")
 (test "abc" string #\a #\b #\c)
 (test "" string)
 (err/rt-test (string #\a 1))
@@ -800,6 +842,7 @@
 (err/rt-test (string-ref "" 0) exn:application:mismatch?)
 (err/rt-test (string-ref "" (expt 2 100)) exn:application:mismatch?)
 (err/rt-test (string-ref "apple" -1))
+(err/rt-test (string-ref "456" 4) exn:fail:contract? #rx"[[]0, 2[]]")
 (test "" substring "ab" 0 0)
 (test "" substring "ab" 1 1)
 (test "" substring "ab" 2 2)
@@ -1107,6 +1150,7 @@
 (err/rt-test (bytes-set! hello-bytes 5 97) exn:application:mismatch?)
 (err/rt-test (bytes-set! hello-bytes -1 97))
 (err/rt-test (bytes-set! hello-bytes (expt 2 100) 97) exn:application:mismatch?)
+(err/rt-test (bytes-set! (bytes 4 5 6) 4 0) exn:fail:contract? #rx"[[]0, 2[]]")
 (test #"abc" bytes 97 98 99)
 (test #"" bytes)
 (err/rt-test (bytes #\a 1))
@@ -1126,6 +1170,7 @@
 (err/rt-test (bytes-ref #"" 0) exn:application:mismatch?)
 (err/rt-test (bytes-ref #"" (expt 2 100)) exn:application:mismatch?)
 (err/rt-test (bytes-ref #"apple" -1))
+(err/rt-test (bytes-ref (bytes 4 5 6) 4) exn:fail:contract? #rx"[[]0, 2[]]")
 (test #"" subbytes #"ab" 0 0)
 (test #"" subbytes #"ab" 1 1)
 (test #"" subbytes #"ab" 2 2)
@@ -1168,13 +1213,26 @@
 (test (bytes 97 0 98) bytes-copy (bytes 97 0 98))
 (bytes-fill! s (char->integer #\x))
 (test #"xxxxx" 'bytes-fill! s)
+(let ([bstr (make-bytes 10)])
+  (test (void) bytes-copy! bstr 1 #"testing" 2 6)
+  (test #"\0stin\0\0\0\0\0" values bstr)
+  (test (void) bytes-copy! bstr 0 #"testing")
+  (test #"testing\0\0\0" values bstr))
 (arity-test bytes-copy 1 1)
 (arity-test bytes-fill! 2 2)
 (err/rt-test (bytes-copy 'blah))
 (err/rt-test (bytes-fill! 'sym 1))
 (err/rt-test (bytes-fill! #"static" 1))
 (err/rt-test (bytes-fill! (bytes-copy #"oops") #\5))
-
+(err/rt-test (bytes-copy! (bytes-copy #"oops") #\5))
+(err/rt-test (bytes-copy! (bytes-copy #"oops") 0 -1))
+(err/rt-test (bytes-copy! (bytes-copy #"oops") 0 #"src" #f))
+(err/rt-test (bytes-copy! (bytes-copy #"oops") 0 #"src" -1))
+(err/rt-test (bytes-copy! (bytes-copy #"oops") 0 #"src" 1 #f))
+(err/rt-test (bytes-copy! (bytes-copy #"oops") 0 #"src" 1 0))
+(err/rt-test (bytes-copy! (bytes-copy #"oops") 0 #"src" 1 17))
+(err/rt-test (bytes-copy! (bytes-copy #"o") 0 #"src"))
+(err/rt-test (bytes-copy! (bytes-copy #"o") 0 #"src" 1))
 (test #t bytes=? #"a" #"a" #"a")
 (test #t bytes=? #"a" #"a")
 (test #t bytes=? #"a")
@@ -2333,6 +2391,7 @@
           [a (make-a 1 (make-a 2 3))]
           [b (box (list 1 2 3))]
           [fl (flvector 1.0 +nan.0 0.0)]
+          [fx (fxvector 1 -2 0)]
           [cyclic-list (read (open-input-string "#2=(#1=(#2#) #2#)"))])
 
       (test 0 hash-count h1)
@@ -2347,7 +2406,8 @@
                      (hash-set! h1 (save 3/45) 'rational)
                      (hash-set! h1 (save 3+45i) 'complex)
                      (hash-set! h1 (save (integer->char 955)) 'char)
-                     (hash-set! h1 (save fl) 'flvector))]
+                     (hash-set! h1 (save fl) 'flvector)
+                     (hash-set! h1 (save fx) 'fxvector))]
             [puts2 (lambda ()
                      (hash-set! h1 (save (list 5 7)) 'another-list)
                      (hash-set! h1 (save 3+0.0i) 'izi-complex)
@@ -2363,7 +2423,7 @@
             (puts1))
           (begin
             (puts1)
-            (test 8 hash-count h1)
+            (test 9 hash-count h1)
             (puts2))))
 
       (when reorder?
@@ -2375,7 +2435,7 @@
             (loop (add1 i))
             (hash-remove! h1 i))))
 
-      (test 15 hash-count h1)
+      (test 16 hash-count h1)
       (test 'list hash-ref h1 l)
       (test 'list hash-ref h1 (list 1 2 3))
       (test 'another-list hash-ref h1 (list 5 7))
@@ -2395,6 +2455,7 @@
       (test 'box hash-ref h1 #&(1 2 3))
       (test 'char hash-ref h1 (integer->char 955))
       (test 'flvector hash-ref h1 (flvector 1.0 +nan.0 0.0))
+      (test 'fxvector hash-ref h1 (fxvector 1 -2 0))
       (test 'cyclic-list hash-ref h1 cyclic-list)
       (test #t
             andmap
@@ -2415,14 +2476,15 @@
               (#\u3BB . char)
               (#&(1 2 3) . box)
               (,(flvector 1.0 +nan.0 0.0) . flvector)
+              (,(fxvector 1 -2 0) . fxvector)
               (,cyclic-list . cyclic-list)))
 
       (hash-remove! h1 (list 1 2 3))
-      (test 14 hash-count h1)
+      (test 15 hash-count h1)
       (test 'not-there hash-ref h1 l (lambda () 'not-there))
       (let ([c 0])
         (hash-for-each h1 (lambda (k v) (set! c (add1 c))))
-        (test 14 'count c))
+        (test 15 'count c))
       ;; return the hash table:
       h1))
 
@@ -2975,7 +3037,10 @@
 (test (system-type) system-type 'os)
 (test #t string? (system-type 'machine))
 (test #t symbol? (system-type 'link))
+(test #t symbol? (system-type 'os*))
+(test #t symbol? (system-type 'arch))
 (test #t relative-path? (system-library-subpath))
+(test #t relative-path? (system-library-subpath #f))
 
 (test #t pair? (memv (system-type 'word) '(32 64)))
 (test (fixnum? (expt 2 32)) = (system-type 'word) 64)
@@ -3090,6 +3155,33 @@
 (test 'again object-name (procedure-rename (procedure-rename + 'plus) 'again))
 (test 'again object-name (procedure-rename (procedure-reduce-arity + 3) 'again))
 (test 3 procedure-arity (procedure-rename (procedure-reduce-arity + 3) 'again))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(test #f equal?/recur 1 2 (lambda (a b) 'yes))
+(test #t equal?/recur 1 1 (lambda (a b) 'yes))
+(test #t equal?/recur '(1 . 2) '(1 . 2) (lambda (a b) 'yes))
+(test #f equal?/recur '(1 . 2) '(1 . 2) (lambda (a b) (eq? a 1)))
+(test #t equal?/recur '(1 . 1) '(1 . 2) (lambda (a b) (or (eq? a b) (eq? a 1))))
+
+(test #t equal?/recur '#(1 2 3) '#(1 2 3) (lambda (a b) 'yes))
+(test #f equal?/recur '#(1 2 3) '#(1 2 3) (lambda (a b) (not (eqv? a 2))))
+
+(test #t equal?/recur '#&1 '#&1 (lambda (a b) 'yes))
+(test #f equal?/recur '#&1 '#&1 (lambda (a b) #f))
+
+(test #t equal?/recur '#hash((1 . x)) '#hash((1 . x)) (lambda (a b) 'yes))
+(test #t equal?/recur '#hash((1 . x)) '#hash((1 . z)) (lambda (a b) (or (eq? a b) (eq? 'z b))))
+(test #f equal?/recur '#hash(("2" . x)) (hash (string-copy "2") 'x) (lambda (a b) (eq? a b)))
+(test #t equal?/recur '#hash(("2" . x)) (hash (string-copy "2") 'x) (lambda (a b) (or (eq? a b) (eq? "2" a))))
+(test #f equal?/recur '#hash((1 . x)) '#hash((1 . x)) (lambda (a b) #f))
+(test #f equal?/recur '#hash((1 . x)) '#hash((1 . x)) (lambda (a b) (eq? a 1)))
+(test #f equal?/recur '#hash((1 . x)) '#hash((1 . x)) (lambda (a b) (eq? a 'x)))
+
+(let ()
+  (struct a (x) #:transparent)
+  (test #t equal?/recur (a 1) (a 2) (lambda (a b) 'yes))
+  (test #f equal?/recur (a 1) (a 1) (lambda (a b) (not (eq? a 1)))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
